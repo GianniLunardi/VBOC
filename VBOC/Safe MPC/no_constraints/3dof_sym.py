@@ -7,6 +7,7 @@ import time
 from triplependulum_class_vboc import OCPtriplependulumSTD, SYMtriplependulum
 from multiprocessing import Pool
 from scipy.stats import qmc
+import matplotlib.pyplot as plt
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -21,6 +22,7 @@ def simulate(p):
     simX[0] = np.copy(x0)
 
     times = [None] * tot_steps
+    times_cpu = [None] * tot_steps
 
     failed_iter = -1
 
@@ -67,8 +69,15 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
         simU[f] = u_sol_guess[0]
+        # print('Iteration: %d' % f)
+        # print('Time of linearization: %.6f' % ocp.ocp_solver.get_stats('time_lin'))
+        # print('Time integration (contribution external calls): %.6f' % ocp.ocp_solver.get_stats('time_sim_ad'))
+        # print('Time integration: %.6f' % ocp.ocp_solver.get_stats('time_sim'))
+        # print('Time QP: %.6f' % ocp.ocp_solver.get_stats('time_qp'))
+        # print('Total time: %.6f' % ocp.ocp_solver.get_stats('time_tot'))
+        times_cpu[f] = ocp.ocp_solver.get_stats('time_tot')
 
-    return f, times
+    return f, times, times_cpu
 
 def init_guess(p):
 
@@ -93,14 +102,14 @@ def init_guess(p):
 
 start_time = time.time()
 
-cpu_num = 30
+cpu_num = 1
 test_num = 100
 
-time_step = 5*1e-3
-tot_time = 0.11
+time_step = 4*1e-3
+tot_time = 0.148
 tot_steps = 100
 
-ocp = OCPtriplependulumSTD("SQP", time_step, 0.5, True)
+ocp = OCPtriplependulumSTD("SQP", time_step, 0.2, True)
 
 # Generate low-discrepancy unlabeled samples:
 sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
@@ -111,7 +120,7 @@ data = qmc.scale(sample, l_bounds, u_bounds)
 
 N = ocp.ocp.dims.N
 
-with Pool(cpu_num) as p:
+with Pool(30) as p:
     res = p.map(init_guess, range(data.shape[0]))
 
 x_sol_guess_vec, u_sol_guess_vec = zip(*res)
@@ -130,13 +139,27 @@ N = ocp.ocp.dims.N
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps, stats = zip(*res)
+res_steps, stats, stats_cpu = zip(*res)
 
 times = np.array([i for f in stats for i in f if i is not None])
+times_cpu = np.array([i for f in stats_cpu for i in f if i is not None])
 
 print('90 percent quantile solve time: ' + str(np.quantile(times, 0.9)))
+print('90 percent quantile CPU time: ' + str(np.quantile(times_cpu, 0.9)))
 print('Mean solve time: ' + str(np.mean(times)))
+print('Standard deviation of solve time: %.6f' % np.std(times))
 
 print(np.array(res_steps).astype(int))
 
-np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
+# np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
+
+# Plot timing
+# plt.figure()
+# plt.plot(np.linspace(0, len(times), len(times)), times)
+# plt.xlabel('Iteration')
+# plt.ylabel('Solve time [s]')
+# plt.show()
+
+# Save the results in an npz file
+# np.savez('../data/results_no_constraint.npz', times=times,
+#          dt=time_step, tot_time=tot_time, res_steps=res_steps)

@@ -106,11 +106,11 @@ mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 safety_margin = 2.0
 
-cpu_num = 10
+cpu_num = 1
 test_num = 100
 
-time_step = 5*1e-3
-tot_time = 0.02 #0.1 0.011s, 0.06 0.008s, 0.04 0.006s, 0.03 0.0044s
+time_step = 4*1e-3
+tot_time = 0.148 #0.1 0.011s, 0.06 0.008s, 0.04 0.006s, 0.03 0.0044s
 tot_steps = 100
 
 regenerate = True
@@ -120,28 +120,42 @@ u_sol_guess_vec = np.load('../u_sol_guess.npy')
 
 params = list(model.parameters())
 
-ocp = OCPtriplependulumSoftTraj("SQP_RTI", time_step, tot_time, params, mean, std, safety_margin, regenerate)
-sim = SYMtriplependulum(time_step, tot_time, regenerate)
+quant = 10.
+r = 1
 
-# Generate low-discrepancy unlabeled samples:
-sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-sample = sampler.random(n=test_num)
-l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-data = qmc.scale(sample, l_bounds, u_bounds)
+while True:
+    ocp = OCPtriplependulumSoftTraj("SQP_RTI", time_step, tot_time, params, mean, std, safety_margin, regenerate)
+    sim = SYMtriplependulum(time_step, tot_time, regenerate)
 
-N = ocp.ocp.dims.N
+    # Generate low-discrepancy unlabeled samples:
+    sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
+    sample = sampler.random(n=test_num)
+    l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
+    u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
+    data = qmc.scale(sample, l_bounds, u_bounds)
 
-# MPC controller without terminal constraints:
-with Pool(cpu_num) as p:
-    res = p.map(simulate, range(data.shape[0]))
+    N = ocp.ocp.dims.N
 
-res_steps_traj, stats = zip(*res)
+    # MPC controller without terminal constraints:
+    with Pool(cpu_num) as p:
+        res = p.map(simulate, range(data.shape[0]))
 
-times = np.array([i for f in stats for i in f if i is not None])
+    res_steps_traj, stats = zip(*res)
 
-print('90 percent quantile solve time: ' + str(np.quantile(times, 0.9)))
-print('Mean solve time: ' + str(np.mean(times)))
+    times = np.array([i for f in stats for i in f if i is not None])
+
+    quant = np.quantile(times, 0.9)
+    print('##### ITERATION: ' + str(r) + ' #####')
+    print('90 percent quantile solve time: ' + str(quant))
+    print('Mean solve time: ' + str(np.mean(times)))
+    print('Standard deviation of solve time: %.6f' % np.std(times))
+
+    if quant < time_step - 1e-3:
+        break
+
+    tot_time -= 5 * time_step
+    r += 1
+    del ocp
 
 print(np.array(res_steps_traj).astype(int))
 
@@ -165,3 +179,8 @@ print('MPC standard vs MPC with receiding hard constraints')
 print('Percentage of initial states in which the MPC+VBOC behaves better: ' + str(better))
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
+
+# Save the results in an npz file
+np.savez('../data/results_receiding.npz', res_steps_term=res_steps_traj,
+         better=better, worse=worse, equal=equal, times=times,
+         dt=time_step, tot_time=tot_time)

@@ -9,6 +9,7 @@ from triplependulum_class_vboc import OCPtriplependulumHardTerm, SYMtriplependul
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 from scipy.stats import qmc
+import matplotlib.pyplot as plt
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -83,40 +84,54 @@ mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 safety_margin = 2.0
 
-cpu_num = 10
+cpu_num = 1
 test_num = 100
 
-time_step = 5*1e-3
-tot_time = 0.3 #0.1 and 0.115 0.002s, 0.15 0.027s, 0.2 0.003s, 0.25 0.0035s
+time_step = 4*1e-3
+tot_time = 0.148 #0.1 and 0.115 0.002s, 0.15 0.027s, 0.2 0.003s, 0.25 0.0035s
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
 
-ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
-sim = SYMtriplependulum(time_step, tot_time, regenerate)
+quant = 10.
+r = 1
 
-# Generate low-discrepancy unlabeled samples:
-sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-sample = sampler.random(n=test_num)
-l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-data = qmc.scale(sample, l_bounds, u_bounds)
+while True:
+    ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
+    sim = SYMtriplependulum(time_step, tot_time, regenerate)
 
-N = ocp.ocp.dims.N
+    # Generate low-discrepancy unlabeled samples:
+    sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
+    sample = sampler.random(n=test_num)
+    l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
+    u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
+    data = qmc.scale(sample, l_bounds, u_bounds)
 
-# MPC controller without terminal constraints:
-with Pool(cpu_num) as p:
-    res = p.map(simulate, range(data.shape[0]))
+    N = ocp.ocp.dims.N
 
-res_steps_term, stats = zip(*res)
+    # MPC controller without terminal constraints:
+    with Pool(cpu_num) as p:
+        res = p.map(simulate, range(data.shape[0]))
 
-times = np.array([i for f in stats for i in f if i is not None])
+    res_steps_term, stats = zip(*res)
 
-print('90 percent quantile solve time: ' + str(np.quantile(times, 0.9)))
-print('Mean solve time: ' + str(np.mean(times)))
+    times = np.array([i for f in stats for i in f if i is not None])
+
+    quant = np.quantile(times, 0.9)
+    print('##### ITERATION: ' + str(r) + ' #####')
+    print('90 percent quantile solve time: ' + str(quant))
+    print('Mean solve time: ' + str(np.mean(times)))
+    print('Standard deviation of solve time: %.6f' % np.std(times))
+
+    if quant < time_step - 1e-3:
+        break
+
+    tot_time -= 5 * time_step
+    r += 1
+    del ocp
 
 print(np.array(res_steps_term).astype(int))
 
@@ -140,3 +155,15 @@ print('MPC standard vs MPC with hard term constraints')
 print('Percentage of initial states in which the MPC+VBOC behaves better: ' + str(better))
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
+
+# Plot timing
+# plt.figure()
+# plt.plot(np.linspace(0, len(times), len(times)), times)
+# plt.xlabel('Iteration')
+# plt.ylabel('Solve time [s]')
+# plt.show()
+
+# Save the results in an npz file
+np.savez('../data/results_hardterm.npz', res_steps_term=res_steps_term,
+         better=better, worse=worse, equal=equal, times=times,
+         dt=time_step, tot_time=tot_time)

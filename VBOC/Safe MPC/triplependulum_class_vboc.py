@@ -106,7 +106,7 @@ class OCPtriplependulum(MODELtriplependulum):
         self.ny_e = self.nx
 
         # cost
-        Q = np.diag([1e4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])
+        Q = np.diag([1e-4, 1e4, 1e-4, 1e-4, 1e-4, 1e-4])
         R = np.diag([1e-4, 1e-4, 1e-4])
 
         self.ocp.cost.W_e = Q
@@ -128,8 +128,8 @@ class OCPtriplependulum(MODELtriplependulum):
         self.dthetamax = 10.
 
         # reference
-        self.ocp.cost.yref = np.array([self.thetamax-0.05,np.pi,np.pi,0.,0.,0.,0.,0.,0.])
-        self.ocp.cost.yref_e = np.array([self.thetamax-0.05,np.pi,np.pi,0.,0.,0.,])
+        self.ocp.cost.yref = np.array([np.pi,self.thetamax-0.05,np.pi,0.,0.,0.,0.,0.,0.])
+        self.ocp.cost.yref_e = np.array([np.pi,self.thetamax-0.05,np.pi,0.,0.,0.,])
 
         self.Cmax_limits = np.array([self.Cmax, self.Cmax, self.Cmax])
         self.Cmin_limits = np.array([-self.Cmax, -self.Cmax, -self.Cmax])
@@ -246,23 +246,24 @@ class OCPtriplependulumSoftTraj(OCPtriplependulum):
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = self.nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = self.nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)        # terminal
         
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
 
-        self.ocp.constraints.idxsh_e = np.array([0])
+        self.ocp.constraints.idxsh_e = np.array([0])            # index of soft terminal constraint
 
-        self.ocp.cost.zl_e = np.zeros((1,))
+        self.ocp.cost.zl_e = np.zeros((1,))         # pesi associati al soft terminal, per l'hard non ci servono
         self.ocp.cost.zu_e = np.zeros((1,))
         self.ocp.cost.Zu_e = np.zeros((1,))
         self.ocp.cost.Zl_e = np.zeros((1,))
 
-        self.model.con_h_expr = self.model.con_h_expr_e
+        self.model.con_h_expr = self.model.con_h_expr_e     # running, sefety margin a 0 per hard
         
         self.ocp.constraints.lh = np.array([0.])
         self.ocp.constraints.uh = np.array([1e6])
 
+        # togli queste 5 righe per avere un hard running
         self.ocp.constraints.idxsh = np.array([0])
 
         self.ocp.cost.zl = np.zeros((1,))

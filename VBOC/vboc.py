@@ -440,7 +440,7 @@ print('Start data generation')
 
 # Data generation:
 cpu_num = 30
-num_prob = 1000
+num_prob = 10000
 with Pool(cpu_num) as p:
     traj = p.map(data_generation, range(num_prob))
 

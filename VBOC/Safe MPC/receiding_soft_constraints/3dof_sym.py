@@ -5,7 +5,7 @@ sys.path.insert(1, os.getcwd() + '/..')
 import numpy as np
 import time
 import torch
-from triplependulum_class_vboc import OCPtriplependulumReceidingHard, SYMtriplependulum, nn_decisionfunction
+from triplependulum_class_vboc import OCPtriplependulumReceidingSoft, SYMtriplependulum, nn_decisionfunction
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 import scipy.linalg as lin
@@ -41,7 +41,7 @@ def simulate(p):
                     receiding = N - i + 1
 
         receiding_iter = N-failed_iter-receiding
-        Q = np.diag([1e-4+pow(10,receiding_iter/N*4), 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])
+        Q = np.diag([1e-4+pow(10,receiding_iter/N*4), 1e-4, 1e-4, 1e-4, 1e-4, 1e-4]) 
         R = np.diag([1e-4, 1e-4, 1e-4]) 
 
         for i in range(N):
@@ -51,9 +51,9 @@ def simulate(p):
 
         for i in range(N):
             if i == receiding_iter:
-                ocp.ocp_solver.constraints_set(i, "lh", np.array([0.]))
+                ocp.ocp_solver.cost_set(i, "Zl", 1e6*np.ones((1,)))
             else:
-                ocp.ocp_solver.constraints_set(i, "lh", np.array([-1e6]))
+                ocp.ocp_solver.cost_set(i, "Zl", np.zeros((1,)))
        
         status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
@@ -110,7 +110,7 @@ cpu_num = 1
 test_num = 100
 
 time_step = 5*1e-3
-tot_time = 0.16
+tot_time = 0.18 - 2* time_step
 tot_steps = 100
 
 regenerate = True
@@ -118,11 +118,11 @@ regenerate = True
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
 noise_vec = np.load('../noise.npy')
-# joint_vec = np.load('../selected_joint.npy')
+joint_vec = np.load('../selected_joint.npy')
 
 params = list(model.parameters())
 
-ocp = OCPtriplependulumReceidingHard("SQP_RTI", time_step, tot_time, params, mean, std, safety_margin, regenerate)
+ocp = OCPtriplependulumReceidingSoft("SQP_RTI", time_step, tot_time, params, mean, std, safety_margin, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, regenerate)
 
 # Generate low-discrepancy unlabeled samples:
@@ -152,7 +152,7 @@ print('Mean solve time: ' + str(np.mean(times)))
 
 print(np.array(res_steps_traj).astype(int))
 
-np.save('res_steps_receiding_hardsoft.npy', np.array(res_steps_traj).astype(int))
+np.save('res_steps_receiding.npy', np.array(res_steps_traj).astype(int))
 
 res_steps = np.load('../no_constraints/res_steps_noconstr.npy')
 
@@ -168,11 +168,11 @@ for i in range(res_steps.shape[0]):
     else:
         worse += 1
 
-print('MPC standard vs MPC with receiding constraints (hard receding + soft terminal)')
+print('MPC standard vs MPC with receiding hard constraints')
 print('Percentage of initial states in which the MPC+VBOC behaves better: ' + str(better))
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
-np.savez('../data/results_receiding_hardsoft.npz', res_steps_term=res_steps_traj,
+np.savez('../data/results_receiding_softsoft.npz', res_steps_term=res_steps_traj,
          better=better, worse=worse, equal=equal, times=times,
          dt=time_step, tot_time=tot_time)

@@ -33,9 +33,8 @@ def simulate(p):
 
     for f in range(tot_steps):
        
-        temp = time.time()
-        status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess)
-        times[f] = time.time() - temp
+        status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
+        times[f] = ocp.ocp_solver.get_stats('time_tot')
 
         if status != 0:
 
@@ -65,11 +64,12 @@ def simulate(p):
             x_sol_guess[N] = np.copy(x_sol_guess[N-1])
             u_sol_guess[N-1] = np.copy(u_sol_guess[N-2])
 
+        simU[f] += noise_vec[f]
+
         sim.acados_integrator.set("u", simU[f])
         sim.acados_integrator.set("x", simX[f])
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
-        simU[f] = u_sol_guess[0]
 
     return f, times
 
@@ -87,53 +87,55 @@ safety_margin = 2.0
 cpu_num = 1
 test_num = 100
 
-time_step = 4*1e-3
-tot_time = 0.148 #0.1 and 0.115 0.002s, 0.15 0.027s, 0.2 0.003s, 0.25 0.0035s
+time_step = 5*1e-3
+tot_time = 0.18 - time_step
 tot_steps = 100
 
 regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
+noise_vec = np.load('../noise.npy')
+# joint_vec = np.load('../selected_joint.npy')
 
-quant = 10.
-r = 1
+# quant = 10.
+# r = 1
+#
+# while quant > 4*1e-3:
 
-while True:
-    ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
-    sim = SYMtriplependulum(time_step, tot_time, regenerate)
+ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
+sim = SYMtriplependulum(time_step, tot_time, True)
 
-    # Generate low-discrepancy unlabeled samples:
-    sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-    sample = sampler.random(n=test_num)
-    l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-    u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-    data = qmc.scale(sample, l_bounds, u_bounds)
+N = ocp.ocp.dims.N
 
-    N = ocp.ocp.dims.N
+# Generate low-discrepancy unlabeled samples:
+sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
+sample = sampler.random(n=test_num)
+l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
+u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
+data = qmc.scale(sample, l_bounds, u_bounds)
 
-    # MPC controller without terminal constraints:
-    with Pool(cpu_num) as p:
-        res = p.map(simulate, range(data.shape[0]))
+# MPC controller without terminal constraints:
+with Pool(cpu_num) as p:
+    res = p.map(simulate, range(data.shape[0]))
 
-    res_steps_term, stats = zip(*res)
+res_steps_term, stats = zip(*res)
 
-    times = np.array([i for f in stats for i in f if i is not None])
+times = np.array([i for f in stats for i in f if i is not None])
 
-    quant = np.quantile(times, 0.9)
-    print('##### ITERATION: ' + str(r) + ' #####')
-    print('90 percent quantile solve time: ' + str(quant))
-    print('Mean solve time: ' + str(np.mean(times)))
-    print('Standard deviation of solve time: %.6f' % np.std(times))
+quant = np.quantile(times, 0.99)
 
-    if quant < time_step - 1e-3:
-        break
+# print('iter: ', str(r))
+print('tot time: ' + str(tot_time))
+print('99 percent quantile solve time: ' + str(quant))
+print('Mean solve time: ' + str(np.mean(times)))
 
-    tot_time -= 5 * time_step
-    r += 1
-    del ocp
+# tot_time -= time_step
+# r += 1
 
 print(np.array(res_steps_term).astype(int))
+
+del ocp
 
 np.save('res_steps_hardterm.npy', np.array(res_steps_term).astype(int))
 
@@ -156,14 +158,6 @@ print('Percentage of initial states in which the MPC+VBOC behaves better: ' + st
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
-# Plot timing
-# plt.figure()
-# plt.plot(np.linspace(0, len(times), len(times)), times)
-# plt.xlabel('Iteration')
-# plt.ylabel('Solve time [s]')
-# plt.show()
-
-# Save the results in an npz file
 np.savez('../data/results_hardterm.npz', res_steps_term=res_steps_term,
          better=better, worse=worse, equal=equal, times=times,
          dt=time_step, tot_time=tot_time)

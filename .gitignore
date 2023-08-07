@@ -7,3 +7,5 @@ mean_*
 model_*
 std_*
 __pycache__/
+*.png
+*.sh

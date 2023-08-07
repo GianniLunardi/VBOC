@@ -3,7 +3,9 @@ import sys
 sys.path.insert(1, os.getcwd() + '/..')
 
 import numpy as np
-import random 
+import cProfile
+import pstats
+import random
 import matplotlib.pyplot as plt
 from numpy.linalg import norm as norm
 import time
@@ -248,7 +250,7 @@ def data_generation(v):
                 # If the previous state was on a limit, the current state location cannot be identified using
                 # the corresponding unviable state but it has to rely on the proximity to the state limits 
                 # (more restrictive):
-                if any(i > q_max - eps or i < q_min + eps for i in x_sol[f][:system_sel]) or any(i > v_max - tol or i < v_min + tol for i in x_sol[system_sel:ocp.ocp.dims.nx - 1]):
+                if any(i > q_max - eps or i < q_min + eps for i in x_sol[f][:system_sel]) or any(i > v_max - tol or i < v_min + tol for i in x_sol[f][system_sel:ocp.ocp.dims.nx - 1]):
                     is_x_at_limit = True # the state is on dX
                 
                 else:
@@ -404,10 +406,10 @@ def data_generation(v):
 start_time = time.time()
 
 # Select system:
-system_sel = 2 # 2 for double pendulum, 3 for triple pendulum
+system_sel = 3 # 2 for double pendulum, 3 for triple pendulum
 
 # Prune the model:
-prune_model = True
+prune_model = False
 prune_amount = 0.5 # percentage of connections to delete
 
 # Ocp initialization:
@@ -471,6 +473,8 @@ model_dir = NeuralNetDIR(input_layers, hidden_layers, output_layers).to(device)
 criterion_dir = nn.MSELoss()
 optimizer_dir = torch.optim.Adam(model_dir.parameters(), lr=learning_rate)
 
+# model_dir.load_state_dict(torch.load('model_' + system_sel + 'dof_vboc'))
+
 # Joint positions mean and variance:
 mean_dir, std_dir = torch.mean(torch.tensor(X_save[:,:system_sel].tolist())).to(device).item(), torch.std(torch.tensor(X_save[:,:system_sel].tolist())).to(device).item()
 torch.save(mean_dir, 'mean_' + str(system_sel) + 'dof_vboc')
@@ -487,8 +491,6 @@ for i in range(X_train_dir.shape[0]):
     for l in range(system_sel):
         X_train_dir[i][l] = (X_save[i][l] - mean_dir) / std_dir
         X_train_dir[i][l+system_sel] = X_save[i][l+system_sel] / vel_norm
-
-# model_dir.load_state_dict(torch.load('model_' + system_sel + 'dof_vboc'))
 
 beta = 0.95
 n_minibatch = 4096
@@ -558,8 +560,8 @@ with torch.no_grad():
     outputs = model_dir(X_iter_tensor)
     print('RMSE test data: ', torch.sqrt(criterion_dir(outputs, y_iter_tensor)))
 
-# # Save the model:
-# torch.save(model_dir.state_dict(), 'model_' + str(system_sel) + 'dof_vboc')
+# Save the model:
+torch.save(model_dir.state_dict(), 'model_' + str(system_sel) + 'dof_vboc')
 
 if prune_model:
 
@@ -611,7 +613,7 @@ if prune_model:
         val = beta * val + (1 - beta) * loss.item()
         it += 1
 
-        if it % B == 0: 
+        if it % B == 0:
             print(val)
             training_evol.append(val)
 

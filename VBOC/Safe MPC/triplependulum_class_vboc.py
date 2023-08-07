@@ -1,13 +1,12 @@
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSim, AcadosSimSolver
 import numpy as np
 from acados_template import AcadosModel
-from casadi import SX, vertcat, cos, sin, fmax, norm_2
+from casadi import SX, vertcat, cos, sin, fmax, norm_2, if_else, DM
 import scipy.linalg as lin
 
 
 class MODELtriplependulum:
     def __init__(self, time_step, tot_time):
-
         model_name = "triple_pendulum_ode"
 
         # constants
@@ -54,12 +53,72 @@ class MODELtriplependulum:
             dtheta1,
             dtheta2,
             dtheta3,
-            (-self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(-2 * theta3 + 2 * theta2 + theta1) - self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(2 * theta3 - 2 * theta2 + theta1) + 2 * C1 * self.l2 * self.l3 * self.m3 * cos(-2 * theta3 + 2 * theta2) + 2 * dtheta1 ** 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m2 * (self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(-2 * theta2 + theta1 + theta3) - 2 * C2 * self.l1 * self.l3 * self.m3 * cos(-2 * theta3 + theta2 + theta1) + 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(-2 * theta2 + theta1 + theta3) + 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) *
-             cos(theta1 - theta3) + 2 * (C2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (self.g * self.l1 * self.m2 * (self.m2 + self.m3) * sin(-2 * theta2 + theta1) + 2 * dtheta2 ** 2 * self.l1 * self.l2 * self.m2 * (self.m2 + self.m3) * sin(-theta2 + theta1) + self.m3 * dtheta3 ** 2 * sin(theta1 - theta3) * self.l1 * self.l3 * self.m2 + self.g * self.l1 * (self.m2 ** 2 + (self.m3 + 2 * self.m1) * self.m2 + self.m1 * self.m3) * sin(theta1) - C1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(-2 * theta3 + 2 * theta2) - self.m2 ** 2 + (-self.m3 - 2 * self.m1) * self.m2 - self.m1 * self.m3) / self.l2 / 2,
-            (-2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(2 * theta1 - theta3 - theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(2 * theta1 - theta3 - theta2) + self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(theta2 + 2 * theta1 - 2 * theta3) - self.g * self.l1 * self.l3 * ((self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(-theta2 + 2 * theta1) - 2 * dtheta2 ** 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m2 * (self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) + 2 * C2 * self.l1 * self.l3 * self.m3 * cos(-2 * theta3 + 2 * theta1) + 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m1 * self.m3 * dtheta2 ** 2 * sin(-2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * cos(-2 * theta3 + theta2 + theta1) + 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m1 * self.m3 * dtheta1 ** 2 * sin(-2 * theta3 +
-             theta2 + theta1) - 2 * self.l1 ** 2 * self.l3 * dtheta1 ** 2 * ((self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(-theta2 + theta1) + 2 * C3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(-theta3 + theta2) + (2 * C1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (4 * dtheta3 ** 2 * self.m3 * self.l3 * (self.m1 + self.m2 / 2) * self.l2 * sin(-theta3 + theta2) + self.g * self.m3 * self.l2 * self.m1 * sin(-2 * theta3 + theta2) + self.g * ((self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * C2 * (self.m3 + 2 * self.m1 + 2 * self.m2))) * self.l3) / (self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(-2 * theta3 + 2 * theta2) + (-self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 / self.l2 ** 2 / 2,
-            (-2 * self.m3 * C2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(2 * theta1 - theta3 - theta2) + self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) ** 2 * cos(-2 * theta2 + 2 * theta1) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(2 * theta1 - theta3) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(-theta3 + 2 * theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m1 * self.m3 ** 2 * dtheta3 ** 2 * sin(-2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(-2 * theta2 + theta1 + theta3) + 2 * self.m3 * dtheta1 ** 2 * self.l1 ** 2 *
-             self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(-2 * theta2 + theta1 + theta3) + 2 * self.m3 * C2 * self.l1 * self.l3 * (self.m3 + 2 * self.m1 + self.m2) * cos(-theta3 + theta2) + (self.m2 + self.m3) * (2 * C1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (-2 * self.m3 * dtheta1 ** 2 * self.l1 * self.l3 * self.m1 * sin(theta1 - theta3) - 4 * self.m3 * dtheta2 ** 2 * sin(-theta3 + theta2) * self.l2 * self.l3 * self.m1 + self.g * self.m3 * sin(theta3) * self.l3 * self.m1 - 2 * C3 * (self.m3 + 2 * self.m1 + self.m2))) * self.l2) / self.m3 / (self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(-2 * theta3 + 2 * theta2) + (-self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 ** 2 / self.l2 / 2, 
+            (-self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
+                -2 * theta3 + 2 * theta2 + theta1) - self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
+                2 * theta3 - 2 * theta2 + theta1) + 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                -2 * theta3 + 2 * theta2) + 2 * dtheta1 ** 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m2 * (
+                         self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) * cos(
+                -2 * theta2 + theta1 + theta3) - 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta3 + theta2 + theta1) + 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
+                -2 * theta2 + theta1 + theta3) + 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) *
+             cos(theta1 - theta3) + 2 * (C2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (
+                                self.g * self.l1 * self.m2 * (self.m2 + self.m3) * sin(
+                            -2 * theta2 + theta1) + 2 * dtheta2 ** 2 * self.l1 * self.l2 * self.m2 * (
+                                            self.m2 + self.m3) * sin(-theta2 + theta1) + self.m3 * dtheta3 ** 2 * sin(
+                            theta1 - theta3) * self.l1 * self.l3 * self.m2 + self.g * self.l1 * (
+                                            self.m2 ** 2 + (self.m3 + 2 * self.m1) * self.m2 + self.m1 * self.m3) * sin(
+                            theta1) - C1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (
+                        self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
+                    -2 * theta3 + 2 * theta2) - self.m2 ** 2 + (
+                                    -self.m3 - 2 * self.m1) * self.m2 - self.m1 * self.m3) / self.l2 / 2,
+            (-2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(
+                2 * theta1 - theta3 - theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
+                2 * theta1 - theta3 - theta2) + self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
+                theta2 + 2 * theta1 - 2 * theta3) - self.g * self.l1 * self.l3 * (
+                         (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
+                -theta2 + 2 * theta1) - 2 * dtheta2 ** 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m2 * (
+                         self.m2 + self.m3) * sin(
+                -2 * theta2 + 2 * theta1) + 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta3 + 2 * theta1) + 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m1 * self.m3 * dtheta2 ** 2 * sin(
+                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                -2 * theta3 + theta2 + theta1) + 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m1 * self.m3 * dtheta1 ** 2 * sin(
+                -2 * theta3 +
+                theta2 + theta1) - 2 * self.l1 ** 2 * self.l3 * dtheta1 ** 2 * (
+                         (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
+                -theta2 + theta1) + 2 * C3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(
+                -theta3 + theta2) + (2 * C1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (
+                        4 * dtheta3 ** 2 * self.m3 * self.l3 * (self.m1 + self.m2 / 2) * self.l2 * sin(
+                    -theta3 + theta2) + self.g * self.m3 * self.l2 * self.m1 * sin(-2 * theta3 + theta2) + self.g * (
+                                    (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (
+                                        self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * C2 * (
+                                    self.m3 + 2 * self.m1 + 2 * self.m2))) * self.l3) / (
+                        self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
+                    -2 * theta3 + 2 * theta2) + (
+                                    -self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 / self.l2 ** 2 / 2,
+            (-2 * self.m3 * C2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(
+                2 * theta1 - theta3 - theta2) + self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
+                         self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) ** 2 * cos(
+                -2 * theta2 + 2 * theta1) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
+                         self.m2 + self.m3) * sin(
+                2 * theta1 - theta3) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
+                         self.m2 + self.m3) * sin(
+                -theta3 + 2 * theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m1 * self.m3 ** 2 * dtheta3 ** 2 * sin(
+                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(
+                -2 * theta2 + theta1 + theta3) + 2 * self.m3 * dtheta1 ** 2 * self.l1 ** 2 *
+             self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(
+                        -2 * theta2 + theta1 + theta3) + 2 * self.m3 * C2 * self.l1 * self.l3 * (
+                         self.m3 + 2 * self.m1 + self.m2) * cos(-theta3 + theta2) + (self.m2 + self.m3) * (
+                         2 * C1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (
+                             -2 * self.m3 * dtheta1 ** 2 * self.l1 * self.l3 * self.m1 * sin(
+                         theta1 - theta3) - 4 * self.m3 * dtheta2 ** 2 * sin(
+                         -theta3 + theta2) * self.l2 * self.l3 * self.m1 + self.g * self.m3 * sin(
+                         theta3) * self.l3 * self.m1 - 2 * C3 * (
+                                         self.m3 + 2 * self.m1 + self.m2))) * self.l2) / self.m3 / (
+                        self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
+                    -2 * theta3 + 2 * theta2) + (
+                                    -self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 ** 2 / self.l2 / 2,
         )
 
         self.model = AcadosModel()
@@ -77,7 +136,6 @@ class MODELtriplependulum:
 
 class SYMtriplependulum(MODELtriplependulum):
     def __init__(self, time_step, tot_time, regenerate):
-
         # inherit initialization
         super().__init__(time_step, tot_time)
 
@@ -90,7 +148,6 @@ class SYMtriplependulum(MODELtriplependulum):
 
 class OCPtriplependulum(MODELtriplependulum):
     def __init__(self, nlp_solver_type, time_step, tot_time):
-
         # inherit initialization
         super().__init__(time_step, tot_time)
 
@@ -98,7 +155,7 @@ class OCPtriplependulum(MODELtriplependulum):
 
         # times
         self.ocp.solver_options.tf = self.tot_time
-        self.ocp.dims.N = int(self.tot_time/self.time_step)
+        self.ocp.dims.N = int(self.tot_time / self.time_step)
 
         self.nx = self.model.x.size()[0]
         self.nu = self.model.u.size()[0]
@@ -106,11 +163,11 @@ class OCPtriplependulum(MODELtriplependulum):
         self.ny_e = self.nx
 
         # cost
-        Q = np.diag([1e-4, 1e4, 1e-4, 1e-4, 1e-4, 1e-4])
-        R = np.diag([1e-4, 1e-4, 1e-4])
+        self.Q = np.diag([1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])
+        self.R = np.diag([1e-4, 1e-4, 1e-4])
 
-        self.ocp.cost.W_e = Q
-        self.ocp.cost.W = lin.block_diag(Q, R)
+        self.ocp.cost.W_e = self.Q
+        self.ocp.cost.W = lin.block_diag(self.Q, self.R)
 
         self.ocp.cost.cost_type = "LINEAR_LS"
         self.ocp.cost.cost_type_e = "LINEAR_LS"
@@ -127,14 +184,18 @@ class OCPtriplependulum(MODELtriplependulum):
         self.thetamin = - np.pi / 4 + np.pi
         self.dthetamax = 10.
 
+        self.yref = np.array([np.pi, np.pi, np.pi, 0., 0., 0., 0., 0., 0.])
+
         # reference
-        self.ocp.cost.yref = np.array([np.pi,self.thetamax-0.05,np.pi,0.,0.,0.,0.,0.,0.])
-        self.ocp.cost.yref_e = np.array([np.pi,self.thetamax-0.05,np.pi,0.,0.,0.,])
+        self.ocp.cost.yref = self.yref
+        self.ocp.cost.yref_e = self.yref[:self.nx]
 
         self.Cmax_limits = np.array([self.Cmax, self.Cmax, self.Cmax])
         self.Cmin_limits = np.array([-self.Cmax, -self.Cmax, -self.Cmax])
-        self.Xmax_limits = np.array([self.thetamax, self.thetamax, self.thetamax, self.dthetamax, self.dthetamax, self.dthetamax])
-        self.Xmin_limits = np.array([self.thetamin, self.thetamin, self.thetamin, -self.dthetamax, -self.dthetamax, -self.dthetamax])
+        self.Xmax_limits = np.array(
+            [self.thetamax, self.thetamax, self.thetamax, self.dthetamax, self.dthetamax, self.dthetamax])
+        self.Xmin_limits = np.array(
+            [self.thetamin, self.thetamin, self.thetamin, -self.dthetamax, -self.dthetamax, -self.dthetamax])
 
         self.ocp.constraints.lbu = self.Cmin_limits
         self.ocp.constraints.ubu = self.Cmax_limits
@@ -150,7 +211,7 @@ class OCPtriplependulum(MODELtriplependulum):
         self.ocp.constraints.lbx_0 = self.Xmin_limits
         self.ocp.constraints.ubx_0 = self.Xmax_limits
         self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3, 4, 5])
-        
+
         # options
         self.ocp.solver_options.nlp_solver_type = nlp_solver_type
         self.ocp.solver_options.qp_solver_iter_max = 100
@@ -160,30 +221,38 @@ class OCPtriplependulum(MODELtriplependulum):
         self.ocp.solver_options.alpha_min = 1e-2
         self.ocp.solver_options.levenberg_marquardt = 1e-2
 
-    def OCP_solve(self, x0, x_sol_guess, u_sol_guess):
-
+    def OCP_solve(self, x0, x_sol_guess, u_sol_guess, ref, joint):
         # Reset current iterate:
         self.ocp_solver.reset()
 
         self.ocp_solver.constraints_set(0, "lbx", x0)
         self.ocp_solver.constraints_set(0, "ubx", x0)
 
+        yref = self.yref
+        yref[joint] = ref
+        Q = self.Q
+        Q[joint,joint] = 1e4
+        W = lin.block_diag(Q, self.R)
+
         # Set parameters, guesses and constraints:
         for i in range(self.ocp.dims.N):
             self.ocp_solver.set(i, 'x', x_sol_guess[i])
             self.ocp_solver.set(i, 'u', u_sol_guess[i])
+            self.ocp_solver.cost_set(i, 'yref', yref, api='new')
+            self.ocp_solver.cost_set(i, 'W', W, api='new')
 
         self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[self.ocp.dims.N])
+        self.ocp_solver.cost_set(self.ocp.dims.N, 'yref', yref[:self.ocp.dims.nx], api='new')
+        self.ocp_solver.cost_set(self.ocp.dims.N, 'W', Q, api='new')
 
         # Solve the OCP:
         status = self.ocp_solver.solve()
-        
+
         return status
-    
+
 
 class OCPtriplependulumSTD(OCPtriplependulum):
     def __init__(self, nlp_solver_type, time_step, tot_time, regenerate):
-
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
@@ -192,17 +261,42 @@ class OCPtriplependulumSTD(OCPtriplependulum):
 
         # solver
         self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
+
+
+def nn_decisionfunction(params, mean, std, x):
+    vel_norm = fmax(norm_2(x[2:]), 1e-3)
+
+    mean = vertcat(mean, mean, mean, 0., 0., 0.)
+    std = vertcat(std, std, std, vel_norm, vel_norm, vel_norm)
+
+    out = (x - mean) / std
+    it = 0
+
+    for param in params:
+
+        param = SX(param.tolist())
+
+        if it % 2 == 0:
+            out = param @ out
+        else:
+            out = param + out
+
+            if it == 1 or it == 3:
+                out = fmax(0., out)
+
+        it += 1
+
+    return out - vel_norm
 
 
 class OCPtriplependulumHardTerm(OCPtriplependulum):
     def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
-
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = self.nn_decisionfunction(nn_params, mean, std, self.x)
-        
+        self.model.con_h_expr_e = nn_decisionfunction(nn_params, mean, std, self.x)
+
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
 
@@ -212,61 +306,87 @@ class OCPtriplependulumHardTerm(OCPtriplependulum):
         # solver
         self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
 
-    def nn_decisionfunction(self, params, mean, std, x):
 
-        vel_norm = fmax(norm_2(x[2:]), 1e-3)
+def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
+    vel_norm = fmax(norm_2(x[2:]), 1e-3)
 
-        mean = vertcat(mean,mean,mean,0.,0.,0.)
-        std = vertcat(std,std,std,vel_norm,vel_norm,vel_norm)
+    mean = vertcat(mean, mean, mean, 0., 0., 0.)
+    std = vertcat(std, std, std, vel_norm, vel_norm, vel_norm)
 
-        out = (x - mean) / std
-        it = 0
+    out = (x - mean) / std
+    it = 0
 
-        for param in params:
+    for param in params:
 
-            param = SX(param.tolist())
+        param = SX(param.tolist())
 
-            if it % 2 == 0:
-                out = param @ out
-            else:
-                out = param + out
+        if it % 2 == 0:
+            out = param @ out
+        else:
+            out = param + out
 
-                if it == 1 or it == 3:
-                    out = fmax(0., out)
+            if it == 1 or it == 3:
+                out = fmax(0., out)
 
-            it += 1
+        it += 1
 
-        return out - vel_norm 
-    
+    return out * (100 - safety_margin) / 100 - vel_norm
 
-class OCPtriplependulumSoftTraj(OCPtriplependulum):
+
+class OCPtriplependulumSoftTerm(OCPtriplependulum):
     def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
-
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = self.nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)        # terminal
-        
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
 
-        self.ocp.constraints.idxsh_e = np.array([0])            # index of soft terminal constraint
+        self.ocp.constraints.idxsh_e = np.array([0])
 
-        self.ocp.cost.zl_e = np.zeros((1,))         # pesi associati al soft terminal, per l'hard non ci servono
+        self.ocp.cost.zl_e = np.zeros((1,))
         self.ocp.cost.zu_e = np.zeros((1,))
         self.ocp.cost.Zu_e = np.zeros((1,))
         self.ocp.cost.Zl_e = np.zeros((1,))
 
-        self.model.con_h_expr = self.model.con_h_expr_e     # running, sefety margin a 0 per hard
-        
+        # ocp model
+        self.ocp.model = self.model
+
+        # solver
+        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
+
+
+class OCPtriplependulumReceidingSoft(OCPtriplependulum):
+    # Soft receding, soft terminal
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+        # inherit initialization
+        super().__init__(nlp_solver_type, time_step, tot_time)
+
+        # nonlinear constraints
+        # soft terminal
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+
+        self.ocp.constraints.lh_e = np.array([0.])
+        self.ocp.constraints.uh_e = np.array([1e6])
+
+        self.ocp.constraints.idxsh_e = np.array([0])
+
+        self.ocp.cost.zl_e = np.zeros((1,))  # weight soft terminal
+        self.ocp.cost.zu_e = np.zeros((1,))
+        self.ocp.cost.Zu_e = np.zeros((1,))
+        self.ocp.cost.Zl_e = np.zeros((1,))
+
+        # soft receding
+        self.model.con_h_expr = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+
         self.ocp.constraints.lh = np.array([0.])
         self.ocp.constraints.uh = np.array([1e6])
 
-        # togli queste 5 righe per avere un hard running
         self.ocp.constraints.idxsh = np.array([0])
 
-        self.ocp.cost.zl = np.zeros((1,))
+        self.ocp.cost.zl = np.zeros((1,))  # weight soft running
         self.ocp.cost.zu = np.zeros((1,))
         self.ocp.cost.Zu = np.zeros((1,))
         self.ocp.cost.Zl = np.zeros((1,))
@@ -277,29 +397,35 @@ class OCPtriplependulumSoftTraj(OCPtriplependulum):
         # solver
         self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
 
-    def nn_decisionfunction_conservative(self, params, mean, std, safety_margin, x):
 
-        vel_norm = fmax(norm_2(x[2:]), 1e-3)
+class OCPtriplependulumReceidingHard(OCPtriplependulum):
+    # Soft receding, soft terminal
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+        # inherit initialization
+        super().__init__(nlp_solver_type, time_step, tot_time)
 
-        mean = vertcat(mean,mean,mean,0.,0.,0.)
-        std = vertcat(std,std,std,vel_norm,vel_norm,vel_norm)
+        # nonlinear constraints
+        # soft terminal
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
 
-        out = (x - mean) / std
-        it = 0
+        self.ocp.constraints.lh_e = np.array([0.])
+        self.ocp.constraints.uh_e = np.array([1e6])
 
-        for param in params:
+        self.ocp.constraints.idxsh_e = np.array([0])
 
-            param = SX(param.tolist())
+        self.ocp.cost.zl_e = np.zeros((1,))  # weight soft terminal
+        self.ocp.cost.zu_e = np.zeros((1,))
+        self.ocp.cost.Zu_e = np.zeros((1,))
+        self.ocp.cost.Zl_e = np.zeros((1,))
 
-            if it % 2 == 0:
-                out = param @ out
-            else:
-                out = param + out
+        # hard receding
+        self.model.con_h_expr = nn_decisionfunction(nn_params, mean, std, self.x)
 
-                if it == 1 or it == 3:
-                    out = fmax(0., out)
+        self.ocp.constraints.lh = np.array([0.])
+        self.ocp.constraints.uh = np.array([1e6])
 
-            it += 1
+        # ocp model
+        self.ocp.model = self.model
 
-        return out*(100-safety_margin)/100 - vel_norm 
-    
+        # solver
+        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)

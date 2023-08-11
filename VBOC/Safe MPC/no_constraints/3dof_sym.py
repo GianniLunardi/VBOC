@@ -8,6 +8,7 @@ from triplependulum_class_vboc import OCPtriplependulumSTD, SYMtriplependulum
 from multiprocessing import Pool
 from scipy.stats import qmc
 import random
+import pickle
 import matplotlib.pyplot as plt
 
 import warnings
@@ -18,11 +19,11 @@ def simulate(p):
     x0 = np.zeros((ocp.ocp.dims.nx,))
     x0[:ocp.ocp.dims.nu] = data[p]
 
-    simX = np.ndarray((tot_steps + 1, ocp.ocp.dims.nx))
-    simU = np.ndarray((tot_steps, ocp.ocp.dims.nu))
+    simX = np.empty((tot_steps + 1, ocp.ocp.dims.nx)) * np.nan
+    simU = np.empty((tot_steps, ocp.ocp.dims.nu)) * np.nan
     simX[0] = np.copy(x0)
 
-    times = [None] * tot_steps
+    times = np.empty(tot_steps) * np.nan
 
     failed_iter = -1
 
@@ -70,7 +71,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times
+    return f, times, simX, simU
 
 def init_guess(p):
 
@@ -141,9 +142,10 @@ N = ocp.ocp.dims.N
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps, stats = zip(*res)
+res_steps, stats, x_traj, u_traj = zip(*res)
 
-times = np.array([i for f in stats for i in f if i is not None])
+times = np.array([i for f in stats for i in f ])
+times = times[~np.isnan(times)]
 
 print('99 percent quantile solve time: ' + str(np.quantile(times, 0.99)))
 print('Mean solve time: ' + str(np.mean(times)))
@@ -154,8 +156,19 @@ print(np.mean(res_steps))
 np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
 
 # Save the results in an npz file
-np.savez('../data/results_no_constraint.npz', times=times,
-         dt=time_step, tot_time=tot_time, res_steps=res_steps)
+# np.savez('../data/results_no_constraint.npz', times=times,
+#          dt=time_step, tot_time=tot_time, res_steps=res_steps)
 
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
+
+# Save pickle file
+with open('../data/results_no_constraint.pickle', 'wb') as f:
+    all_data = dict()
+    all_data['times'] = times
+    all_data['dt'] = time_step
+    all_data['tot_time'] = tot_time
+    all_data['res_steps'] = res_steps
+    all_data['x_traj'] = x_traj
+    all_data['u_traj'] = u_traj
+    pickle.dump(all_data, f)

@@ -10,6 +10,7 @@ from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 import scipy.linalg as lin
 from scipy.stats import qmc
+import pickle
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -19,13 +20,13 @@ def simulate(p):
     x0 = np.zeros((ocp.ocp.dims.nx,))
     x0[:ocp.ocp.dims.nu] = data[p]
 
-    simX = np.ndarray((tot_steps + 1, ocp.ocp.dims.nx))
-    simU = np.ndarray((tot_steps, ocp.ocp.dims.nu))
+    simX = np.empty((tot_steps + 1, ocp.ocp.dims.nx)) * np.nan
+    simU = np.empty((tot_steps, ocp.ocp.dims.nu)) * np.nan
     simX[0] = np.copy(x0)
 
-    times = [None] * tot_steps
+    times = np.empty(tot_steps) * np.nan
 
-    failed_iter = -1
+    failed_iter = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
@@ -41,13 +42,13 @@ def simulate(p):
                     receiding = N - i + 1
 
         receiding_iter = N-failed_iter-receiding
-        Q = np.diag([1e-4+pow(10,receiding_iter/N*4), 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])
-        R = np.diag([1e-4, 1e-4, 1e-4]) 
-
-        for i in range(N):
-            ocp.ocp_solver.cost_set(i, "W", lin.block_diag(Q, R))
-
-        ocp.ocp_solver.cost_set(N, "W", Q)
+        # Q = np.diag([1e-4+pow(10,receiding_iter/N*4), 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])
+        # R = np.diag([1e-4, 1e-4, 1e-4])
+        #
+        # for i in range(N):
+        #     ocp.ocp_solver.cost_set(i, "W", lin.block_diag(Q, R))
+        #
+        # ocp.ocp_solver.cost_set(N, "W", Q)
 
         for i in range(N):
             if i == receiding_iter:
@@ -93,7 +94,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times
+    return f, receiding_iter, times, simX, simU
 
 start_time = time.time()
 
@@ -106,11 +107,11 @@ mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 safety_margin = 2.0
 
-cpu_num = 1
+cpu_num = 8
 test_num = 100
 
 time_step = 5*1e-3
-tot_time = 0.16
+tot_time = 0.18 - 5 * time_step
 tot_steps = 100
 
 regenerate = True
@@ -140,9 +141,10 @@ ocp.ocp_solver.cost_set(N, "Zl", 1e4*np.ones((1,)))
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps_traj, stats = zip(*res)
+res_steps_traj, rec_iter, stats, x_traj, u_traj = zip(*res)
 
-times = np.array([i for f in stats for i in f if i is not None])
+times = np.array([i for f in stats for i in f ])
+times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)
 
@@ -150,7 +152,11 @@ print('tot time: ' + str(tot_time))
 print('99 percent quantile solve time: ' + str(quant))
 print('Mean solve time: ' + str(np.mean(times)))
 
+print('Residual steps: ')
 print(np.array(res_steps_traj).astype(int))
+print('Mean number of steps: ' + str(np.mean(res_steps_traj)))
+print('Last receding iteration: ')
+print(np.array(rec_iter).astype(int))
 
 np.save('res_steps_receiding_hardsoft.npy', np.array(res_steps_traj).astype(int))
 
@@ -173,6 +179,23 @@ print('Percentage of initial states in which the MPC+VBOC behaves better: ' + st
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
-np.savez('../data/results_receiding_hardsoft.npz', res_steps_term=res_steps_traj,
-         better=better, worse=worse, equal=equal, times=times,
-         dt=time_step, tot_time=tot_time)
+# np.savez('../data/results_receiding_hardsoft.npz', res_steps_term=res_steps_traj,
+#          better=better, worse=worse, equal=equal, times=times,
+#          dt=time_step, tot_time=tot_time)
+
+end_time = time.time()
+print('Elapsed time: ' + str(end_time-start_time))
+
+# Save pickle file
+with open('../data/results_receiding_hardsoft.pickle', 'wb') as f:
+    all_data = dict()
+    all_data['times'] = times
+    all_data['dt'] = time_step
+    all_data['tot_time'] = tot_time
+    all_data['res_steps'] = res_steps_traj
+    all_data['x_traj'] = x_traj
+    all_data['u_traj'] = u_traj
+    all_data['better'] = better
+    all_data['worse'] = worse
+    all_data['equal'] = equal
+    pickle.dump(all_data, f)

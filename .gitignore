@@ -1,5 +1,6 @@
 .idea/
 *.npz
+*.pickle
 *.npy
 *.json
 c_generated_code/
@@ -9,3 +10,4 @@ std_*
 __pycache__/
 *.png
 *.sh
+VBOC/Safe MPC/torch2casadi/_l4c_generated/

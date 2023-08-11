@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Load data
-data_dir = "data/"
+data_dir = "data_wo_noise/"
 data_no = np.load(data_dir + "results_no_constraint.npz")
 SAVE_PLOT = 0
 

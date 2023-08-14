@@ -376,3 +376,109 @@ class OCPdoublependulumReceidingHard(OCPdoublependulum):
 
         # solver
         self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
+
+
+class OCPBackupController(MODELdoublependulum):
+    def __init__(self, time_step, tot_time, regenerate):
+        # inherit initialization
+        super().__init__(time_step, tot_time)
+
+        self.ocp = AcadosOcp()
+
+        # times
+        self.ocp.solver_options.tf = self.tot_time
+        self.ocp.dims.N = int(self.tot_time / self.time_step)
+
+        self.nx = self.model.x.size()[0]
+        self.nu = self.model.u.size()[0]
+        self.ny = self.nx + self.nu
+        self.ny_e = self.nx
+
+        # cost
+        self.Q = 2 * np.diag([0., 0., 1., 1.])
+        self.R = np.diag([0., 0., 0.])
+
+        self.ocp.cost.W_e = self.Q
+        self.ocp.cost.W = lin.block_diag(self.Q, self.R)
+
+        self.ocp.cost.cost_type = "LINEAR_LS"
+        self.ocp.cost.cost_type_e = "LINEAR_LS"
+
+        self.ocp.cost.Vx = np.zeros((self.ny, self.nx))
+        self.ocp.cost.Vx[: self.nx, : self.nx] = np.eye(self.nx)
+        self.ocp.cost.Vu = np.zeros((self.ny, self.nu))
+        self.ocp.cost.Vu[self.nx:, :self.nu] = np.eye(self.nu)
+        self.ocp.cost.Vx_e = np.eye(self.nx)
+
+        # set constraints
+        self.Cmax = 10.
+        self.thetamax = np.pi / 4 + np.pi
+        self.thetamin = - np.pi / 4 + np.pi
+        self.dthetamax = 10.
+
+        # reference
+        self.yref = np.zeros((self.ny,))
+        self.ocp.cost.yref = self.yref
+        self.ocp.cost.yref_e = self.yref[:self.ny_e]
+
+        self.Cmax_limits = np.array([self.Cmax, self.Cmax])
+        self.Cmin_limits = np.array([-self.Cmax, -self.Cmax])
+        self.Xmax_limits = np.array(
+            [self.thetamax, self.thetamax, self.dthetamax, self.dthetamax])
+        self.Xmin_limits = np.array(
+            [self.thetamin, self.thetamin, -self.dthetamax, -self.dthetamax])
+
+        self.ocp.constraints.lbu = self.Cmin_limits
+        self.ocp.constraints.ubu = self.Cmax_limits
+        self.ocp.constraints.idxbu = np.array([0, 1])
+        self.ocp.constraints.lbx = self.Xmin_limits
+        self.ocp.constraints.ubx = self.Xmax_limits
+        self.ocp.constraints.idxbx = np.array([0, 1, 2, 3])
+
+        self.ocp.constraints.lbx_0 = self.Xmin_limits
+        self.ocp.constraints.ubx_0 = self.Xmax_limits
+        self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3])
+
+        # Final velocity constraint to be zero
+        self.Xmax_zerovel_e = np.array([self.thetamax, self.thetamax, 0., 0.])
+        self.Xmin_zerovel_e = np.array([self.thetamin, self.thetamin, 0., 0.])
+
+        self.ocp.constraints.lbx_e = self.Xmin_zerovel_e
+        self.ocp.constraints.ubx_e = self.Xmax_zerovel_e
+        self.ocp.constraints.idxbx_e = np.array([0, 1, 2, 3])
+
+        # options
+        self.ocp.solver_options.nlp_solver_type = "SQP"
+        self.ocp.solver_options.hessian_approx = 'EXACT'
+        self.ocp.solver_options.qp_solver_iter_max = 100
+        self.ocp.solver_options.nlp_solver_max_iter = 1000
+        self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
+        self.ocp.solver_options.alpha_reduction = 0.3
+        self.ocp.solver_options.alpha_min = 1e-2
+        self.ocp.solver_options.levenberg_marquardt = 1e-5
+
+        # ocp model
+        self.ocp.model = self.model
+
+        # solver
+        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
+
+
+    def OCP_solve(self, x0, x_sol_guess, u_sol_guess):
+        # Reset current iterate:
+        self.ocp_solver.reset()
+
+        self.ocp_solver.constraints_set(0, "lbx", x0)
+        self.ocp_solver.constraints_set(0, "ubx", x0)
+
+        # Set parameters, guesses and constraints:
+        for i in range(self.ocp.dims.N):
+            self.ocp_solver.set(i, 'x', x_sol_guess[i])
+            self.ocp_solver.set(i, 'u', u_sol_guess[i])
+
+        self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[self.ocp.dims.N])
+
+        # Solve the OCP:
+        status = self.ocp_solver.solve()
+
+        return status

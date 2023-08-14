@@ -168,7 +168,8 @@ end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
 # Save pickle file
-with open('../data/results_hardterm.pickle', 'wb') as f:
+data_dir = '../data_3dof/'
+with open(data_dir + 'results_hardterm.pickle', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step

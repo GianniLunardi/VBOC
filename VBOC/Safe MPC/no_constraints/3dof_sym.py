@@ -25,7 +25,7 @@ def simulate(p):
 
     times = np.empty(tot_steps) * np.nan
 
-    failed_iter = -1
+    failed_iter = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
@@ -163,7 +163,8 @@ end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
 # Save pickle file
-with open('../data/results_no_constraint.pickle', 'wb') as f:
+data_dir = '../data_3dof/'
+with open(data_dir + 'results_no_constraint.pickle', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step

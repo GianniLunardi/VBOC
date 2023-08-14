@@ -19,7 +19,17 @@ def mean_cost(x_traj, x_ref, Q):
     return cost/n
 
 # Load data
-data_dir = 'data_pickle/'
+dofs = 2
+if dofs == 2:
+    data_dir = 'data_2dof/'
+    x_ref = np.array([5 / 4 * np.pi - 0.05, np.pi, 0., 0.])
+    Q = np.eye(4) * 1e-4
+else:
+    data_dir = 'data_3dof/'
+    x_ref = np.array([5 / 4 * np.pi - 0.05, np.pi, np.pi, 0., 0., 0.])
+    Q = np.eye(6) * 1e-4
+Q[0, 0] = 1e4
+
 data_no = pickle.load(open(data_dir + "results_no_constraint.pickle", 'rb'))
 data_hard = pickle.load(open(data_dir + "results_hardterm.pickle", 'rb'))
 data_soft = pickle.load(open(data_dir + "results_softterm.pickle", 'rb'))
@@ -38,13 +48,6 @@ print('MPC with hard terminal constraints: ' + str(np.mean(res_steps_hard)))
 print('MPC with soft terminal constraints: ' + str(np.mean(res_steps_soft)))
 print('MPC with receding (hard + hard) constraints: ' + str(np.mean(res_steps_rec_hard)))
 print('MPC with receding (soft + soft) constraints: ' + str(np.mean(res_steps_rec_soft)))
-
-# Reference joint configuration
-x_ref = np.array([5/4*np.pi - 0.05, np.pi, np.pi, 0., 0., 0.])
-
-# Compute the running costs for each trajectory
-Q = np.eye(6) * 1e-4
-Q[0,0] = 1e4
 
 cost_no = mean_cost(data_no['x_traj'], x_ref, Q)
 cost_hard = mean_cost(data_hard['x_traj'], x_ref, Q)

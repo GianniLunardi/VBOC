@@ -432,7 +432,7 @@ class OCPtriplependulumReceidingHard(OCPtriplependulum):
 
 
 class OCPBackupController(MODELtriplependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, regenerate):
+    def __init__(self, time_step, tot_time, regenerate):
         # inherit initialization
         super().__init__(time_step, tot_time)
 

@@ -91,7 +91,7 @@ time_step = 5*1e-3
 tot_time = 0.16 - 4*time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -164,7 +164,7 @@ end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
 # Save pickle file
-data_dir = '../data_2dof'
+data_dir = '../data_2dof/'
 with open(data_dir + 'results_softterm.pickle', 'wb') as f:
     all_data = dict()
     all_data['times'] = times

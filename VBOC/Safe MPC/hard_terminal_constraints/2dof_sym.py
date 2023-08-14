@@ -92,7 +92,7 @@ time_step = 5*1e-3
 tot_time = 0.16 - time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')

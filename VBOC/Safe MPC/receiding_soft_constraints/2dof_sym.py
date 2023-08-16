@@ -47,7 +47,7 @@ def simulate(p):
         for i in range(1, N):
             if i == receiding_iter:
                 ocp.ocp_solver.cost_set(i, "Zl", 1e7*np.ones((1,)))
-                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) < 0.:
+                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i-1, 'x')) < 0. and failed_iter == 0:
                     sanity_check += 1
             else:
                 ocp.ocp_solver.cost_set(i, "Zl", np.zeros((1,)))
@@ -103,14 +103,14 @@ mean = torch.load('../mean_2dof_vboc')
 std = torch.load('../std_2dof_vboc')
 safety_margin = 2.0
 
-cpu_num = 6
+cpu_num = 8
 test_num = 100
 
 time_step = 5*1e-3
-tot_time = 0.16 - 5* time_step
+tot_time = 0.16 - 4 * time_step
 tot_steps = 100
 
-regenerate = False
+regenerate = True
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -139,7 +139,8 @@ with Pool(cpu_num) as p:
 
 res_steps_traj, stats, x_traj, u_traj, sanity = zip(*res)
 
-times = np.array([i for f in stats for i in f if i is not None])
+times = np.array([i for f in stats for i in f ])
+times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)
 
@@ -151,7 +152,7 @@ print(np.array(res_steps_traj).astype(int))
 print("Sanity check: ")
 print(np.array(sanity).astype(int))
 
-np.save('res_steps_receiding.npy', np.array(res_steps_traj).astype(int))
+np.save('res_steps_receiding_softsoft.npy', np.array(res_steps_traj).astype(int))
 
 res_steps = np.load('../no_constraints/res_steps_noconstr.npy')
 
@@ -167,7 +168,7 @@ for i in range(res_steps.shape[0]):
     else:
         worse += 1
 
-print('MPC standard vs MPC with receiding hard constraints')
+print('MPC standard vs MPC with receiding soft constraints')
 print('Percentage of initial states in which the MPC+VBOC behaves better: ' + str(better))
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
@@ -177,7 +178,7 @@ print('Elapsed time: ' + str(end_time-start_time))
 
 # Save pickle file
 data_dir = '../data_2dof/'
-with open(data_dir + 'results_receiding_hardsoft.pickle', 'wb') as f:
+with open(data_dir + 'results_receiding_softsoft.pickle', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step

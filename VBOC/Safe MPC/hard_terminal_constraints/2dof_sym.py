@@ -85,14 +85,14 @@ mean = torch.load('../mean_2dof_vboc')
 std = torch.load('../std_2dof_vboc')
 safety_margin = 2.0
 
-cpu_num = 1
+cpu_num = 5
 test_num = 100
 
 time_step = 5*1e-3
-tot_time = 0.16 - time_step
+tot_time = 0.16 - 4 * time_step
 tot_steps = 100
 
-regenerate = False
+regenerate = True
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -122,7 +122,8 @@ with Pool(cpu_num) as p:
 
 res_steps_term, stats, x_traj, u_traj = zip(*res)
 
-times = np.array([i for f in stats for i in f if i is not None])
+times = np.array([i for f in stats for i in f ])
+times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)
 

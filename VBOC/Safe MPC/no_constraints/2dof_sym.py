@@ -144,7 +144,8 @@ with Pool(cpu_num) as p:
 
 res_steps, stats, x_traj, u_traj = zip(*res)
 
-times = np.array([i for f in stats for i in f if i is not None])
+times = np.array([i for f in stats for i in f ])
+times = times[~np.isnan(times)]
 
 print('99 percent quantile solve time: ' + str(np.quantile(times, 0.99)))
 print('Mean solve time: ' + str(np.mean(times)))

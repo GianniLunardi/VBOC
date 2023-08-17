@@ -13,11 +13,17 @@ warnings.filterwarnings("ignore")
 # we will have a set of x_init
 time_step = 5 * 1e-3
 tot_time = 0.16
-x_init = np.zeros((100, 3))
+
+# Retrieve x_init from the pickle file
+data_dir = 'data_2dof/'
+rec_type = 'softsoft'  # hardsoft
+with open(data_dir + 'results_receiding_' + rec_type + '.pickle', 'rb') as f:
+    data_rec = pickle.load(f)
+x_init = data_rec['x_init']
 N_a = x_init.shape[0]
 
 ocp = OCPBackupController(time_step, tot_time, True)
-solved = np.empty(N_a) * np.nan
+solved = np.zeros(N_a)
 
 N = ocp.ocp.dims.N
 nx = ocp.ocp.dims.nx
@@ -38,3 +44,6 @@ for i in range(N_a):
         for j in range(N+1):
             x_sol[j] = ocp.ocp_solver.get(j, "x")
         solutions.append(x_sol)
+
+print('Receding type: ', rec_type)
+print('Solved: ', np.sum(solved), '/', N_a)

@@ -26,6 +26,7 @@ def simulate(p):
     times = np.empty(tot_steps) * np.nan
 
     failed_iter = 0
+    failed_tot = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
@@ -42,6 +43,7 @@ def simulate(p):
                 break
 
             failed_iter += 1
+            failed_tot += 1
 
             simU[f] = u_sol_guess[0]
 
@@ -71,7 +73,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU
+    return f, times, simX, simU, failed_tot
 
 def init_guess(p):
 
@@ -142,7 +144,7 @@ N = ocp.ocp.dims.N
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps, stats, x_traj, u_traj = zip(*res)
+res_steps, stats, x_traj, u_traj, failed = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
@@ -166,6 +168,7 @@ with open(data_dir + 'results_no_constraint.pickle', 'wb') as f:
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps
+    all_data['failed'] = failed
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
     pickle.dump(all_data, f)

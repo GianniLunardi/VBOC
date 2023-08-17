@@ -183,7 +183,7 @@ print('Elapsed time: ' + str(end_time-start_time))
 # Remove all the x_rec in the case in which the full MPC succeeds
 res_arr = np.array(res_steps_traj)
 idx = np.where(res_arr != tot_steps - 1)[0]
-x_init = np.asarray(data)[idx]
+x_init = np.asarray(x_rec)[idx]
 
 # Save pickle file
 data_dir = '../data_2dof/'

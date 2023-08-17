@@ -44,7 +44,8 @@ def simulate(p):
                     receiding = N - i + 1
 
         receiding_iter = N-failed_iter-receiding
-        x_rec = np.copy(ocp.ocp_solver.get(receiding_iter, 'x'))
+        if receiding_iter > 0:
+            x_rec = np.copy(ocp.ocp_solver.get(receiding_iter, 'x'))
 
         for i in range(1, N):
             if i == receiding_iter:

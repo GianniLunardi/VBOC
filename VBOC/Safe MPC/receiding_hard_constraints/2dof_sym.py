@@ -50,7 +50,7 @@ def simulate(p):
         for i in range(1, N):
             if i == receiding_iter:
                 ocp.ocp_solver.constraints_set(i, "lh", np.array([0.]))
-                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i-1, 'x')) < 0. and failed_iter == 0:
+                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) < 0. and failed_iter == 0:
                     sanity_check += 1
             else:
                 ocp.ocp_solver.constraints_set(i, "lh", np.array([-1e6]))

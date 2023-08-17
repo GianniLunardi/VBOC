@@ -3,6 +3,7 @@
 *.pickle
 *.npy
 *.json
+*.txt
 c_generated_code/
 mean_*
 model_*

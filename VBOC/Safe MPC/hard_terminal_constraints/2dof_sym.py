@@ -27,6 +27,7 @@ def simulate(p):
     times = np.empty(tot_steps) * np.nan
 
     failed_iter = 0
+    failed_tot = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
@@ -43,6 +44,7 @@ def simulate(p):
                 break
 
             failed_iter += 1
+            failed_tot += 1
 
             simU[f] = u_sol_guess[0]
 
@@ -72,7 +74,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU
+    return f, times, simX, simU, failed_tot
 
 start_time = time.time()
 
@@ -92,7 +94,7 @@ time_step = 5*1e-3
 tot_time = 0.16 - 4 * time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -120,7 +122,7 @@ data = qmc.scale(sample, l_bounds, u_bounds)
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps_term, stats, x_traj, u_traj = zip(*res)
+res_steps_term, stats, x_traj, u_traj, failed = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
@@ -171,6 +173,7 @@ with open(data_dir + 'results_hardterm.pickle', 'wb') as f:
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps_term
+    all_data['failed'] = failed
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
     all_data['better'] = better

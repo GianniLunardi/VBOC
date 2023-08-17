@@ -27,6 +27,7 @@ def simulate(p):
     times = np.empty(tot_steps) * np.nan
 
     failed_iter = 0
+    failed_tot = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
@@ -43,6 +44,7 @@ def simulate(p):
                     receiding = N - i + 1
 
         receiding_iter = N-failed_iter-receiding
+        x_rec = np.copy(ocp.ocp_solver.get(receiding_iter, 'x'))
 
         for i in range(1, N):
             if i == receiding_iter:
@@ -61,6 +63,7 @@ def simulate(p):
                 break
 
             failed_iter += 1
+            failed_tot += 1
 
             simU[f] = u_sol_guess[0]
 
@@ -90,7 +93,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU, sanity_check
+    return f, times, simX, simU, sanity_check, failed_tot, x_rec
 
 start_time = time.time()
 
@@ -110,7 +113,7 @@ time_step = 5*1e-3
 tot_time = 0.16 - 4 * time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -137,7 +140,7 @@ ocp.ocp_solver.cost_set(N, "Zl", 1e4*np.ones((1,)))
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps_traj, stats, x_traj, u_traj, sanity = zip(*res)
+res_steps_traj, stats, x_traj, u_traj, sanity, failed, x_rec = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
@@ -176,6 +179,11 @@ print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
+# Remove all the x_rec in the case in which the full MPC succeeds
+res_arr = np.array(res_steps_traj)
+idx = np.where(res_arr != tot_steps - 1)[0]
+x_init = np.asarray(data)[idx]
+
 # Save pickle file
 data_dir = '../data_2dof/'
 with open(data_dir + 'results_receiding_hardsoft.pickle', 'wb') as f:
@@ -184,6 +192,8 @@ with open(data_dir + 'results_receiding_hardsoft.pickle', 'wb') as f:
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps_traj
+    all_data['failed'] = failed
+    all_data['x_init'] = x_init
     all_data['sanity'] = sanity
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj

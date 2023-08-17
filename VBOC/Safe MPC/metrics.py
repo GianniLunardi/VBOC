@@ -42,6 +42,12 @@ res_steps_soft = data_soft['res_steps']
 res_steps_rec_hard = data_rec_hard['res_steps']
 res_steps_rec_soft = data_rec_soft['res_steps']
 
+print('#### Better, equal, worse ####')
+print('hard term: ' + str(data_hard['better']) + ', ' + str(data_hard['equal']) + ', ' + str(data_hard['worse']))
+print('soft term: ' + str(data_soft['better']) + ', ' + str(data_soft['equal']) + ', ' + str(data_soft['worse']))
+print('rec hard: ' + str(data_rec_hard['better']) + ', ' + str(data_rec_hard['equal']) + ', ' + str(data_rec_hard['worse']))
+print('rec soft: ' + str(data_rec_soft['better']) + ', ' + str(data_rec_soft['equal']) + ', ' + str(data_rec_soft['worse']))
+
 print('#### Mean residual steps ####')
 print('Naive MPC: ' + str(np.mean(res_steps_no)))
 print('MPC with hard terminal constraints: ' + str(np.mean(res_steps_hard)))

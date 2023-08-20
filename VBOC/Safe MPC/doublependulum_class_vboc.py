@@ -188,11 +188,13 @@ class OCPdoublependulum(MODELdoublependulum):
         # options
         self.ocp.solver_options.nlp_solver_type = nlp_solver_type
         self.ocp.solver_options.qp_solver_iter_max = 100
+        self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
         self.ocp.solver_options.alpha_reduction = 0.3
         self.ocp.solver_options.alpha_min = 1e-2
         self.ocp.solver_options.levenberg_marquardt = 1e-2
+        # self.ocp.solver_options.nlp_solver_ext_qp_res = 1
 
     def OCP_solve(self, x0, x_sol_guess, u_sol_guess, ref, joint):
         # Reset current iterate:
@@ -395,8 +397,8 @@ class OCPBackupController(MODELdoublependulum):
         self.ny_e = self.nx
 
         # cost
-        self.Q = 2 * np.diag([0., 0., 1., 1.])
-        self.R = np.diag([0., 0., 0.])
+        self.Q = 1e2 * np.diag([1e-4, 1e-4, 1., 1.])
+        self.R = np.diag([1e-4, 1e-4])
 
         self.ocp.cost.W_e = self.Q
         self.ocp.cost.W = lin.block_diag(self.Q, self.R)
@@ -440,8 +442,8 @@ class OCPBackupController(MODELdoublependulum):
         self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3])
 
         # Final velocity constraint to be zero
-        self.Xmax_zerovel_e = np.array([self.thetamax, self.thetamax, 0., 0.])
-        self.Xmin_zerovel_e = np.array([self.thetamin, self.thetamin, 0., 0.])
+        self.Xmax_zerovel_e = np.array([self.thetamax, self.thetamax, 0.2, 0.2])
+        self.Xmin_zerovel_e = np.array([self.thetamin, self.thetamin, -0.2, -0.2])
 
         self.ocp.constraints.lbx_e = self.Xmin_zerovel_e
         self.ocp.constraints.ubx_e = self.Xmax_zerovel_e
@@ -456,6 +458,7 @@ class OCPBackupController(MODELdoublependulum):
         self.ocp.solver_options.alpha_reduction = 0.3
         self.ocp.solver_options.alpha_min = 1e-2
         self.ocp.solver_options.levenberg_marquardt = 1e-5
+        # self.ocp.solver_options.nlp_solver_ext_qp_res = 1
 
         # ocp model
         self.ocp.model = self.model

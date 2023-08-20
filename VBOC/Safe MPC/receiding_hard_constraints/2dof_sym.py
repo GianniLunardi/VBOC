@@ -35,17 +35,18 @@ def simulate(p):
 
     receiding = 0
     sanity_check = 0
+    x_rec = np.copy(x0)
 
     for f in range(tot_steps):
 
         if failed_iter == 0 and f > 0:
             for i in range(1, N+1):
-                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) >= 0.:
+                nn_out = nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x'))
+                if nn_out >= 0.:
                     receiding = N - i + 1
+                    x_rec = np.copy(ocp.ocp_solver.get(i, 'x'))
 
         receiding_iter = N-failed_iter-receiding
-        if receiding_iter > 0:
-            x_rec = np.copy(ocp.ocp_solver.get(receiding_iter, 'x'))
 
         for i in range(1, N):
             if i == receiding_iter:

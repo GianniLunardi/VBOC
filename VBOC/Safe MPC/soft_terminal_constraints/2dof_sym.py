@@ -166,6 +166,12 @@ print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
+# Compute the x_init
+x_arr = np.asarray(x_traj)
+res_arr = np.asarray(res_steps_term)
+idx = np.where(res_arr != tot_steps - 1)[0]
+x_init = x_arr[idx, res_arr[idx]]
+
 # Save pickle file
 data_dir = '../data_2dof/'
 with open(data_dir + 'results_softterm.pickle', 'wb') as f:
@@ -175,6 +181,7 @@ with open(data_dir + 'results_softterm.pickle', 'wb') as f:
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps_term
     all_data['failed'] = failed
+    all_data['x_init'] = x_init
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
     all_data['better'] = better

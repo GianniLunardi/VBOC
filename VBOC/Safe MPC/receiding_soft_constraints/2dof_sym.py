@@ -35,17 +35,20 @@ def simulate(p):
 
     receiding = 0
     sanity_check = 0
+    x_rec = np.copy(x0)
 
     for f in range(tot_steps):
 
         if failed_iter == 0 and f > 0:
-            for i in range(1,N+1):
-                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) >= 0.:
+            for i in range(1, N+1):
+                nn_out = nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x'))
+                if nn_out >= 0.:
                     receiding = N - i + 1
+                    x_rec = np.copy(ocp.ocp_solver.get(i, 'x'))
+                    # if nn_out > 0.5:
+                    #     x_rec = np.copy(ocp.ocp_solver.get(i, 'x'))
 
         receiding_iter = N-failed_iter-receiding
-        if receiding_iter > 0:
-            x_rec = np.copy(ocp.ocp_solver.get(receiding_iter, 'x'))
 
         for i in range(1, N):
             if i == receiding_iter:
@@ -105,16 +108,16 @@ model = NeuralNetDIR(4, 300, 1).to(device)
 model.load_state_dict(torch.load('../model_2dof_vboc'))
 mean = torch.load('../mean_2dof_vboc')
 std = torch.load('../std_2dof_vboc')
-safety_margin = 2.0
+safety_margin = 5.0
 
-cpu_num = 8
+cpu_num = 12
 test_num = 100
 
 time_step = 5*1e-3
 tot_time = 0.16 - 4 * time_step
 tot_steps = 100
 
-regenerate = False
+regenerate = True
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')

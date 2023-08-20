@@ -70,6 +70,7 @@ def plots_2dof(X_save, q_min, q_max, v_min, v_max, model_dir, mean_dir, std_dir,
         plt.xlabel('$q_2$')
         plt.grid()
         plt.title("Classifier section")
+        plt.savefig('q2.png')
 
         plt.figure()
         inp = np.c_[
@@ -117,5 +118,6 @@ def plots_2dof(X_save, q_min, q_max, v_min, v_max, model_dir, mean_dir, std_dir,
         plt.xlabel('$q_1$')
         plt.grid()
         plt.title("Classifier section")
+        plt.savefig('q1.png')
 
-    plt.show()
+    # plt.show()

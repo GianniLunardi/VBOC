@@ -17,7 +17,7 @@ def check_viability(x):
     dir_vel = x[2:] / norm_vel
     nn_in = np.hstack([norm_pos, dir_vel])
     nn_out = model(torch.tensor(nn_in.tolist())).item()
-    return nn_out * 0.96 - norm_vel
+    return nn_out * 0.95 - norm_vel
 
 def linear_sat(u, u_bar):
     dim = len(u)
@@ -56,7 +56,7 @@ tot_time = 0.2
 
 # Retrieve x_init from the pickle file
 data_dir = '../data_2dof/'
-rec_type = 'receiding_softsoft'  # receiding_hardsoft, receiding_softsoft, softterm, hardterm, no_constraint
+rec_type = 'no_constraint'  # receiding_hardsoft, receiding_softsoft, softterm, hardterm, no_constraint
 with open(data_dir + 'results_' + rec_type + '.pickle', 'rb') as f:
     data_rec = pickle.load(f)
 x_init = data_rec['x_init']
@@ -85,6 +85,8 @@ solved = np.zeros(N_a)
 solutions_x = []
 solutions_u = []
 
+times = np.empty(N_a) * np.nan
+
 for i in range(N_a):
     x0 = np.copy(x_init[i])
 
@@ -96,6 +98,7 @@ for i in range(N_a):
     x_guess, u_guess = create_guess(x0, x_ref)
 
     status = ocp.OCP_solve(x0, x_guess, u_guess)
+    times[i] = ocp.ocp_solver.get_stats('time_tot')
     # if i == 3:
     #     print('State number: ' + str(i + 1))
     #     print(x_init[i])
@@ -116,8 +119,8 @@ for i in range(N_a):
 
 print('Receding type: ', rec_type)
 print('Solved: ', np.sum(solved), '/', N_a)
+print('Average CPU time: ', np.mean(times))
 print(ocp.thetamax)
 np.set_printoptions(precision=3, suppress=True)
 print(np.vstack([solved, viability]).transpose())
-# print(solutions_u[3])
 

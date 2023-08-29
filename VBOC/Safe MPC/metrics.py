@@ -1,6 +1,7 @@
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
+from functools import reduce
 
 def state_traj_cost(x, x_ref, Q):
     n = x.shape[0]
@@ -68,15 +69,16 @@ print('MPC with hard terminal constraints: ' + str(np.mean(res_steps_hard)))
 # print('MPC with receding (hard + soft) constraints: ' + str(np.mean(res_steps_rec_hard)))
 print('MPC with receding (soft + soft) constraints: ' + str(np.mean(res_steps_rec_soft)))
 
-idx_no = np.where(res_steps_no != len(res_steps_no) - 1)[0]
-idx_hard = np.where(res_steps_hard != len(res_steps_no) - 1)[0]
-idx_rec_soft = np.where(res_steps_rec_soft != len(res_steps_no) - 1)[0]
+idx_no = np.where(res_steps_no == len(res_steps_no) - 1)[0]
+idx_hard = np.where(res_steps_hard == len(res_steps_no) - 1)[0]
+idx_rec_soft = np.where(res_steps_rec_soft == len(res_steps_no) - 1)[0]
+idx_common = reduce(np.intersect1d, (idx_no, idx_hard, idx_rec_soft))
 
-cost_no = mean_cost(np.asarray(data_no['x_traj'])[idx_no], x_ref, Q)
-cost_hard = mean_cost(np.asarray(data_hard['x_traj'])[idx_hard], x_ref, Q)
+cost_no = mean_cost(np.asarray(data_no['x_traj'])[idx_common], x_ref, Q)
+cost_hard = mean_cost(np.asarray(data_hard['x_traj'])[idx_common], x_ref, Q)
 cost_soft = mean_cost(data_soft['x_traj'], x_ref, Q)
 cost_rec_hard = mean_cost(data_rec_hard['x_traj'], x_ref, Q)
-cost_rec_soft = mean_cost(np.asarray(data_rec_soft['x_traj'])[idx_rec_soft], x_ref, Q)
+cost_rec_soft = mean_cost(np.asarray(data_rec_soft['x_traj'])[idx_common], x_ref, Q)
 
 print('#### Mean running cost ####')
 print('Naive MPC: ' + str(cost_no))

@@ -215,6 +215,7 @@ class OCPtriplependulum(MODELtriplependulum):
         # options
         self.ocp.solver_options.nlp_solver_type = nlp_solver_type
         self.ocp.solver_options.qp_solver_iter_max = 100
+        # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
         self.ocp.solver_options.alpha_reduction = 0.3
@@ -263,50 +264,6 @@ class OCPtriplependulumSTD(OCPtriplependulum):
         self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
 
 
-def nn_decisionfunction(params, mean, std, x):
-    vel_norm = fmax(norm_2(x[3:]), 1e-3)
-
-    mean = vertcat(mean, mean, mean, 0., 0., 0.)
-    std = vertcat(std, std, std, vel_norm, vel_norm, vel_norm)
-
-    out = (x - mean) / std
-    it = 0
-
-    for param in params:
-
-        param = SX(param.tolist())
-
-        if it % 2 == 0:
-            out = param @ out
-        else:
-            out = param + out
-
-            if it == 1 or it == 3:
-                out = fmax(0., out)
-
-        it += 1
-
-    return out - vel_norm
-
-
-class OCPtriplependulumHardTerm(OCPtriplependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
-        # inherit initialization
-        super().__init__(nlp_solver_type, time_step, tot_time)
-
-        # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction(nn_params, mean, std, self.x)
-
-        self.ocp.constraints.lh_e = np.array([0.])
-        self.ocp.constraints.uh_e = np.array([1e6])
-
-        # ocp model
-        self.ocp.model = self.model
-
-        # solver
-        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
-
-
 def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
     vel_norm = fmax(norm_2(x[3:]), 1e-3)
 
@@ -331,6 +288,24 @@ def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
         it += 1
 
     return out * (100 - safety_margin) / 100 - vel_norm
+
+
+class OCPtriplependulumHardTerm(OCPtriplependulum):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+        # inherit initialization
+        super().__init__(nlp_solver_type, time_step, tot_time)
+
+        # nonlinear constraints
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+
+        self.ocp.constraints.lh_e = np.array([0.])
+        self.ocp.constraints.uh_e = np.array([1e6])
+
+        # ocp model
+        self.ocp.model = self.model
+
+        # solver
+        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
 
 
 class OCPtriplependulumSoftTerm(OCPtriplependulum):
@@ -419,7 +394,7 @@ class OCPtriplependulumReceidingHard(OCPtriplependulum):
         self.ocp.cost.Zl_e = np.zeros((1,))
 
         # hard receding
-        self.model.con_h_expr = nn_decisionfunction(nn_params, mean, std, self.x)
+        self.model.con_h_expr = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
 
         self.ocp.constraints.lh = np.array([0.])
         self.ocp.constraints.uh = np.array([1e6])
@@ -448,8 +423,8 @@ class OCPBackupController(MODELtriplependulum):
         self.ny_e = self.nx
 
         # cost
-        self.Q = 2 * np.diag([0., 0., 0., 1., 1., 1.])
-        self.R = np.diag([0., 0., 0.])
+        self.Q = 1e2 * np.diag([1e-4, 1e-4, 1e-4, 1., 1., 1.])
+        self.R = np.diag([1e-4, 1e-4, 1e-4])
 
         self.ocp.cost.W_e = self.Q
         self.ocp.cost.W = lin.block_diag(self.Q, self.R)
@@ -504,6 +479,7 @@ class OCPBackupController(MODELtriplependulum):
         self.ocp.solver_options.nlp_solver_type = "SQP"
         self.ocp.solver_options.hessian_approx = 'EXACT'
         self.ocp.solver_options.qp_solver_iter_max = 100
+        # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
         self.ocp.solver_options.alpha_reduction = 0.3

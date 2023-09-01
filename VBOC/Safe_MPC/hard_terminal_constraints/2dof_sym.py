@@ -5,7 +5,7 @@ sys.path.insert(1, os.getcwd() + '/..')
 import numpy as np
 import time
 import torch
-from doublependulum_class_vboc import OCPdoublependulumHardTerm, SYMdoublependulum, nn_decisionfunction_conservative
+from doublependulum_class_vboc import OCPdoublependulumHardTerm, SYMdoublependulum
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 from scipy.stats import qmc
@@ -91,7 +91,7 @@ mean = torch.load('../mean_2dof_vboc')
 std = torch.load('../std_2dof_vboc')
 safety_margin = 5.0
 
-cpu_num = 5
+cpu_num = 1
 test_num = 100
 
 time_step = 5*1e-3
@@ -121,6 +121,8 @@ sample = sampler.random(n=test_num)
 l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
 u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
 data = qmc.scale(sample, l_bounds, u_bounds)
+
+ocp.ocp_solver.set("p", safety_margin, N)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:

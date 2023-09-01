@@ -7,7 +7,7 @@ import scipy.linalg as lin
 
 class MODELdoublependulum:
     def __init__(self, time_step, tot_time):
-        model_name = "triple_pendulum_ode"
+        model_name = "double_pendulum_ode"
 
         # constants
         self.m1 = 0.4  # mass of the first link [kself.g]
@@ -39,7 +39,7 @@ class MODELdoublependulum:
         u = vertcat(C1, C2)
 
         # parameters
-        p = []
+        self.p = SX.sym("safe")
 
         # dynamics
         f_expl = vertcat(
@@ -103,7 +103,7 @@ class MODELdoublependulum:
         self.model.x = self.x
         self.model.xdot = xdot
         self.model.u = u
-        self.model.p = p
+        self.model.p = self.p
         self.model.name = model_name
 
 
@@ -265,12 +265,12 @@ def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
 
 
 class OCPdoublependulumHardTerm(OCPdoublependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
@@ -453,12 +453,12 @@ class OCPBackupController(MODELdoublependulum):
         self.ocp.solver_options.nlp_solver_type = "SQP"
         self.ocp.solver_options.hessian_approx = 'EXACT'
         self.ocp.solver_options.qp_solver_iter_max = 100
+        # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
         self.ocp.solver_options.alpha_reduction = 0.3
         self.ocp.solver_options.alpha_min = 1e-2
         self.ocp.solver_options.levenberg_marquardt = 1e-5
-        # self.ocp.solver_options.nlp_solver_ext_qp_res = 1
 
         # ocp model
         self.ocp.model = self.model

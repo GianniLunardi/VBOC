@@ -4,11 +4,11 @@
 *.npy
 *.json
 *.txt
-c_generated_code/
+**/c_generated_code/
 mean_*
 model_*
 std_*
 __pycache__/
 *.png
 *.sh
-VBOC/Safe MPC/torch2casadi/_l4c_generated/
+**/_l4c_generated/

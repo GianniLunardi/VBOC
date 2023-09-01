@@ -5,7 +5,7 @@ sys.path.insert(1, os.getcwd() + '/..')
 import numpy as np
 import time
 import torch
-from triplependulum_class_vboc import OCPtriplependulumReceidingSoft, SYMtriplependulum, nn_decisionfunction
+from triplependulum_class_vboc import OCPtriplependulumReceidingSoft, SYMtriplependulum, nn_decisionfunction_conservative
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 import scipy.linalg as lin
@@ -27,32 +27,33 @@ def simulate(p):
     times = np.empty(tot_steps) * np.nan
 
     failed_iter = 0
+    failed_tot = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
     u_sol_guess = u_sol_guess_vec[p]
+
+    receiding = 0
+    sanity_check = 0
+    x_rec = np.copy(x0)
 
     for f in range(tot_steps):
 
         receiding = 0
 
         if failed_iter == 0 and f > 0:
-            for i in range(1,N+1):
-                if nn_decisionfunction(params, mean, std, ocp.ocp_solver.get(i, 'x')) >= 0.:
+            for i in range(1, N+1):
+                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) >= 0.:
                     receiding = N - i + 1
+                    x_rec = np.copy(ocp.ocp_solver.get(i, 'x'))
 
         receiding_iter = N-failed_iter-receiding
-        # Q = np.diag([1e-4+pow(10,receiding_iter/N*4), 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])
-        # R = np.diag([1e-4, 1e-4, 1e-4])
-        #
-        # for i in range(N):
-        #     ocp.ocp_solver.cost_set(i, "W", lin.block_diag(Q, R))
-        #
-        # ocp.ocp_solver.cost_set(N, "W", Q)
 
-        for i in range(N):
+        for i in range(1, N):
             if i == receiding_iter:
-                ocp.ocp_solver.cost_set(i, "Zl", 1e6*np.ones((1,)))
+                ocp.ocp_solver.cost_set(i, "Zl", 1e7*np.ones((1,)))
+                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) < 0. and failed_iter == 0:
+                    sanity_check += 1
             else:
                 ocp.ocp_solver.cost_set(i, "Zl", np.zeros((1,)))
        
@@ -65,6 +66,7 @@ def simulate(p):
                 break
 
             failed_iter += 1
+            failed_tot += 1
 
             simU[f] = u_sol_guess[0]
 
@@ -94,7 +96,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, receiding_iter, times, simX, simU
+    return f, times, simX, simU, sanity_check, failed_tot, x_rec
 
 start_time = time.time()
 
@@ -105,13 +107,13 @@ model = NeuralNetDIR(6, 500, 1).to(device)
 model.load_state_dict(torch.load('../model_3dof_vboc'))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
-safety_margin = 2.0
+safety_margin = 5.0
 
-cpu_num = 8
+cpu_num = 12
 test_num = 100
 
 time_step = 5*1e-3
-tot_time = 0.18 - 5 * time_step
+tot_time = 0.18 - 2 * time_step
 tot_steps = 100
 
 regenerate = True
@@ -135,13 +137,13 @@ data = qmc.scale(sample, l_bounds, u_bounds)
 
 N = ocp.ocp.dims.N
 
-ocp.ocp_solver.cost_set(N, "Zl", 1e3*np.ones((1,)))
+ocp.ocp_solver.cost_set(N, "Zl", 1e4*np.ones((1,)))
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps_traj, rec_iter, stats, x_traj, u_traj = zip(*res)
+res_steps_traj, stats, x_traj, u_traj, sanity, failed, x_rec = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
@@ -152,11 +154,9 @@ print('tot time: ' + str(tot_time))
 print('99 percent quantile solve time: ' + str(quant))
 print('Mean solve time: ' + str(np.mean(times)))
 
-print('Residual steps: ')
 print(np.array(res_steps_traj).astype(int))
-print('Mean number of steps: ' + str(np.mean(res_steps_traj)))
-print('Last receding iteration: ')
-print(np.array(rec_iter).astype(int))
+print("Sanity check: ")
+print(np.array(sanity).astype(int))
 
 np.save('res_steps_receiding.npy', np.array(res_steps_traj).astype(int))
 
@@ -186,14 +186,22 @@ print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
+# Remove all the x_rec in the case in which the full MPC succeeds
+res_arr = np.array(res_steps_traj)
+idx = np.where(res_arr != tot_steps - 1)[0]
+x_init = np.asarray(x_rec)[idx]
+
 # Save pickle file
 data_dir = '../data_3dof/'
-with open(data_dir + 'results_receiding_hardsoft.pickle', 'wb') as f:
+with open(data_dir + 'results_receiding_softsoft.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps_traj
+    all_data['failed'] = failed
+    all_data['x_init'] = x_init
+    all_data['sanity'] = sanity
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
     all_data['better'] = better

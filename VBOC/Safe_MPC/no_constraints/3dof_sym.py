@@ -26,6 +26,7 @@ def simulate(p):
     times = np.empty(tot_steps) * np.nan
 
     failed_iter = 0
+    failed_tot = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
@@ -42,6 +43,7 @@ def simulate(p):
                 break
 
             failed_iter += 1
+            failed_tot += 1
 
             simU[f] = u_sol_guess[0]
 
@@ -71,7 +73,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU
+    return f, times, simX, simU, failed_tot
 
 def init_guess(p):
 
@@ -114,10 +116,6 @@ data = qmc.scale(sample, l_bounds, u_bounds)
 
 N = ocp.ocp.dims.N
 
-# joint_vec = np.array([random.choice(range(ocp.nu)) for _ in range(tot_steps)])
-# np.save('../selected_joint', joint_vec)
-# joint_vec = np.load('../selected_joint.npy')            #NOOOOOOOOOOOO
-
 with Pool(30) as p:
     res = p.map(init_guess, range(data.shape[0]))
 
@@ -142,7 +140,7 @@ N = ocp.ocp.dims.N
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps, stats, x_traj, u_traj = zip(*res)
+res_steps, stats, x_traj, u_traj, failed = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
@@ -155,21 +153,25 @@ print(np.mean(res_steps))
 
 np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
 
-# Save the results in an npz file
-# np.savez('../data/results_no_constraint.npz', times=times,
-#          dt=time_step, tot_time=tot_time, res_steps=res_steps)
-
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
+# Compute the x_init
+x_arr = np.asarray(x_traj)
+res_arr = np.asarray(res_steps)
+idx = np.where(res_arr != tot_steps - 1)[0]
+x_init = x_arr[idx, res_arr[idx]]
+
 # Save pickle file
 data_dir = '../data_3dof/'
-with open(data_dir + 'results_no_constraint.pickle', 'wb') as f:
+with open(data_dir + 'results_no_constraint.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps
+    all_data['failed'] = failed
+    all_data['x_init'] = x_init
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
     pickle.dump(all_data, f)

@@ -27,10 +27,13 @@ def simulate(p):
     times = np.empty(tot_steps) * np.nan
 
     failed_iter = 0
+    failed_tot = 0
 
     # Guess:
     x_sol_guess = x_sol_guess_vec[p]
     u_sol_guess = u_sol_guess_vec[p]
+
+    x_rec = np.copy(x0)
 
     for f in range(tot_steps):
        
@@ -43,6 +46,7 @@ def simulate(p):
                 break
 
             failed_iter += 1
+            failed_tot += 1
 
             simU[f] = u_sol_guess[0]
 
@@ -64,6 +68,7 @@ def simulate(p):
             x_sol_guess[N-1] = ocp.ocp_solver.get(N, "x")
             x_sol_guess[N] = np.copy(x_sol_guess[N-1])
             u_sol_guess[N-1] = np.copy(u_sol_guess[N-2])
+            x_rec = np.copy(ocp.ocp_solver.get(N, "x"))
 
         simU[f] += noise_vec[f]
 
@@ -72,7 +77,7 @@ def simulate(p):
         status = sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU
+    return f, times, simX, simU, failed_tot, x_rec
 
 start_time = time.time()
 
@@ -83,16 +88,16 @@ model = NeuralNetDIR(6, 500, 1).to(device)
 model.load_state_dict(torch.load('../model_3dof_vboc'))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
-safety_margin = 2.0
+safety_margin = 5.0
 
-cpu_num = 20
+cpu_num = 1
 test_num = 100
 
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = False
+regenerate = True
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -120,7 +125,7 @@ data = qmc.scale(sample, l_bounds, u_bounds)
 with Pool(cpu_num) as p:
     res = p.map(simulate, range(data.shape[0]))
 
-res_steps_term, stats, x_traj, u_traj = zip(*res)
+res_steps_term, stats, x_traj, u_traj, failed, x_rec = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
@@ -167,14 +172,21 @@ print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
+# Remove all the x_rec in the case in which the full MPC succeeds
+res_arr = np.array(res_steps_term)
+idx = np.where(res_arr != tot_steps - 1)[0]
+x_init = np.asarray(x_rec)[idx]
+
 # Save pickle file
 data_dir = '../data_3dof/'
-with open(data_dir + 'results_hardterm.pickle', 'wb') as f:
+with open(data_dir + 'results_hardterm.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
     all_data['res_steps'] = res_steps_term
+    all_data['failed'] = failed
+    all_data['x_init'] = x_init
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
     all_data['better'] = better

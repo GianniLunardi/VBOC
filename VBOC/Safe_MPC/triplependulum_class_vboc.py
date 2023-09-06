@@ -46,7 +46,7 @@ class MODELtriplependulum:
         u = vertcat(C1, C2, C3)
 
         # parameters
-        p = []
+        self.p = SX.sym("safe")
 
         # dynamics
         f_expl = vertcat(
@@ -130,7 +130,7 @@ class MODELtriplependulum:
         self.model.x = self.x
         self.model.xdot = xdot
         self.model.u = u
-        self.model.p = p
+        self.model.p = self.p
         self.model.name = model_name
 
 
@@ -143,6 +143,7 @@ class SYMtriplependulum(MODELtriplependulum):
         sim.model = self.model
         sim.solver_options.T = self.time_step
         sim.solver_options.num_stages = 4
+        sim.parameter_values = np.array([0.])
         self.acados_integrator = AcadosSimSolver(sim, build=regenerate)
 
 
@@ -183,6 +184,8 @@ class OCPtriplependulum(MODELtriplependulum):
         self.thetamax = np.pi / 4 + np.pi
         self.thetamin = - np.pi / 4 + np.pi
         self.dthetamax = 10.
+
+        self.ocp.parameter_values = np.array([0.])
 
         self.yref = np.array([np.pi, np.pi, np.pi, 0., 0., 0., 0., 0., 0.])
 
@@ -291,12 +294,12 @@ def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
 
 
 class OCPtriplependulumHardTerm(OCPtriplependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
@@ -309,12 +312,12 @@ class OCPtriplependulumHardTerm(OCPtriplependulum):
 
 
 class OCPtriplependulumSoftTerm(OCPtriplependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
@@ -335,13 +338,13 @@ class OCPtriplependulumSoftTerm(OCPtriplependulum):
 
 class OCPtriplependulumReceidingSoft(OCPtriplependulum):
     # Soft receding, soft terminal
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
         # soft terminal
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
@@ -354,7 +357,7 @@ class OCPtriplependulumReceidingSoft(OCPtriplependulum):
         self.ocp.cost.Zl_e = np.zeros((1,))
 
         # soft receding
-        self.model.con_h_expr = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh = np.array([0.])
         self.ocp.constraints.uh = np.array([1e6])
@@ -375,13 +378,13 @@ class OCPtriplependulumReceidingSoft(OCPtriplependulum):
 
 class OCPtriplependulumReceidingHard(OCPtriplependulum):
     # Soft receding, soft terminal
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
         # soft terminal
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])
@@ -394,7 +397,7 @@ class OCPtriplependulumReceidingHard(OCPtriplependulum):
         self.ocp.cost.Zl_e = np.zeros((1,))
 
         # hard receding
-        self.model.con_h_expr = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh = np.array([0.])
         self.ocp.constraints.uh = np.array([1e6])
@@ -444,6 +447,8 @@ class OCPBackupController(MODELtriplependulum):
         self.thetamin = - np.pi / 4 + np.pi
         self.dthetamax = 10.
 
+        self.ocp.parameter_values = np.array([0.])
+
         # reference
         self.yref = np.zeros((self.ny,))
         self.ocp.cost.yref = self.yref
@@ -468,12 +473,25 @@ class OCPBackupController(MODELtriplependulum):
         self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3, 4, 5])
 
         # Final velocity constraint to be zero
-        self.Xmax_zerovel_e = np.array([self.thetamax, self.thetamax, self.thetamax, 0., 0., 0.])
-        self.Xmin_zerovel_e = np.array([self.thetamin, self.thetamin, self.thetamin, 0., 0., 0.])
+        # self.Xmax_zerovel_e = np.array([self.thetamax, self.thetamax, self.thetamax, 0., 0., 0.])
+        # self.Xmin_zerovel_e = np.array([self.thetamin, self.thetamin, self.thetamin, 0., 0., 0.])
+        #
+        # self.ocp.constraints.lbx_e = self.Xmin_zerovel_e
+        # self.ocp.constraints.ubx_e = self.Xmax_zerovel_e
+        # self.ocp.constraints.idxbx_e = np.array([0, 1, 2, 3, 4, 5])
 
-        self.ocp.constraints.lbx_e = self.Xmin_zerovel_e
-        self.ocp.constraints.ubx_e = self.Xmax_zerovel_e
-        self.ocp.constraints.idxbx_e = np.array([0, 1, 2, 3, 4, 5])
+        # self.ocp.constraints.idxsbx_e = np.array([0, 1, 2, 3, 4, 5])
+        #
+        # self.ocp.cost.zl_e = np.zeros((6,))
+        # self.ocp.cost.zu_e = np.zeros((6,))
+        # self.ocp.cost.Zu_e = np.zeros((6,))
+        # self.ocp.cost.Zl_e = np.zeros((6,))
+
+        C_e = np.zeros((3, 6))
+        C_e[:, :3] = np.identity(3)
+        self.ocp.constraints.C_e = C_e
+        self.ocp.constraints.lg_e = -1e1 * np.ones((3,))
+        self.ocp.constraints.ug_e = np.zeros((3,))
 
         # options
         self.ocp.solver_options.nlp_solver_type = "SQP"
@@ -506,6 +524,10 @@ class OCPBackupController(MODELtriplependulum):
             self.ocp_solver.set(i, 'u', u_sol_guess[i])
 
         self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[self.ocp.dims.N])
+        # self.ocp_solver.cost_set(self.ocp.dims.N, 'zl', 1e4 * np.ones(6))
+        # self.ocp_solver.cost_set(self.ocp.dims.N, 'zu', 1e4 * np.ones(6))
+        # self.ocp_solver.cost_set(self.ocp.dims.N, 'Zl', 1e6 * np.ones(6))
+        # self.ocp_solver.cost_set(self.ocp.dims.N, 'Zu', 1e6 * np.ones(6))
 
         # Solve the OCP:
         status = self.ocp_solver.solve()

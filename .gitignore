@@ -1,5 +1,6 @@
 .idea/
 *.npz
+*.pkl
 *.pickle
 *.npy
 *.json

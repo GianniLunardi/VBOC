@@ -110,7 +110,7 @@ noise_vec = np.load('../noise.npy')
 #
 # while quant > 4*1e-3:
 
-ocp = OCPdoublependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, safety_margin, regenerate)
+ocp = OCPdoublependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 sim = SYMdoublependulum(time_step, tot_time, True)
 
 N = ocp.ocp.dims.N

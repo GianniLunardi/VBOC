@@ -39,8 +39,6 @@ def simulate(p):
 
     for f in range(tot_steps):
 
-        receiding = 0
-
         if failed_iter == 0 and f > 0:
             for i in range(1, N+1):
                 if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) >= 0.:
@@ -51,7 +49,7 @@ def simulate(p):
 
         for i in range(1, N):
             if i == receiding_iter:
-                ocp.ocp_solver.cost_set(i, "Zl", 1e7*np.ones((1,)))
+                ocp.ocp_solver.cost_set(i, "Zl", 1e8*np.ones((1,)))
                 if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) < 0. and failed_iter == 0:
                     sanity_check += 1
             else:
@@ -109,14 +107,14 @@ mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 safety_margin = 5.0
 
-cpu_num = 12
+cpu_num = 20
 test_num = 100
 
 time_step = 5*1e-3
 tot_time = 0.18 - 2 * time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -125,7 +123,7 @@ joint_vec = np.load('../selected_joint.npy')
 
 params = list(model.parameters())
 
-ocp = OCPtriplependulumReceidingSoft("SQP_RTI", time_step, tot_time, params, mean, std, safety_margin, regenerate)
+ocp = OCPtriplependulumReceidingSoft("SQP_RTI", time_step, tot_time, params, mean, std, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, regenerate)
 
 # Generate low-discrepancy unlabeled samples:
@@ -137,7 +135,8 @@ data = qmc.scale(sample, l_bounds, u_bounds)
 
 N = ocp.ocp.dims.N
 
-ocp.ocp_solver.cost_set(N, "Zl", 1e4*np.ones((1,)))
+ocp.ocp_solver.cost_set(N, "Zl", 1e5*np.ones((1,)))
+ocp.ocp_solver.set(N, "p", safety_margin)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
@@ -179,10 +178,6 @@ print('Percentage of initial states in which the MPC+VBOC behaves better: ' + st
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
-# np.savez('../data/results_receiding_softsoft.npz', res_steps_term=res_steps_traj,
-#          better=better, worse=worse, equal=equal, times=times,
-#          dt=time_step, tot_time=tot_time)
-
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
@@ -190,6 +185,7 @@ print('Elapsed time: ' + str(end_time-start_time))
 res_arr = np.array(res_steps_traj)
 idx = np.where(res_arr != tot_steps - 1)[0]
 x_init = np.asarray(x_rec)[idx]
+print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
 data_dir = '../data_3dof/'

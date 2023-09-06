@@ -5,7 +5,7 @@ sys.path.insert(1, os.getcwd() + '/..')
 import numpy as np
 import time
 import torch
-from triplependulum_class_vboc import OCPtriplependulumSoftTerm, SYMtriplependulum
+from triplependulum_class_vboc import OCPtriplependulumSoftTerm, SYMtriplependulum, nn_decisionfunction_conservative
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 from scipy.stats import qmc
@@ -38,6 +38,7 @@ def simulate(p):
        
         status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
+        slack = ocp.ocp_solver.get(N, "sl")
 
         if status != 0:
 
@@ -67,7 +68,12 @@ def simulate(p):
             x_sol_guess[N-1] = ocp.ocp_solver.get(N, "x")
             x_sol_guess[N] = np.copy(x_sol_guess[N-1])
             u_sol_guess[N-1] = np.copy(u_sol_guess[N-2])
-            x_rec = np.copy(ocp.ocp_solver.get(N, "x"))
+            decision = nn_decisionfunction_conservative(list(model.parameters()), mean, std,
+                                                        safety_margin, ocp.ocp_solver.get(N, "x"))
+            if slack < 1e-9:
+                x_rec = np.copy(ocp.ocp_solver.get(N, "x"))
+                print('p: ' + str(p) + ' f: ' + str(f) + ' slack: ' + str(slack) + ' decision: ' + str(decision))
+                print(ocp.ocp_solver.get_residuals())
 
         simU[f] += noise_vec[f]
 
@@ -96,7 +102,7 @@ time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -108,7 +114,7 @@ noise_vec = np.load('../noise.npy')
 #
 # while quant > time_step - 1e-3:
 
-ocp = OCPtriplependulumSoftTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, safety_margin, regenerate)
+ocp = OCPtriplependulumSoftTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, True)
 
 N = ocp.ocp.dims.N
@@ -120,7 +126,8 @@ l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
 u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
 data = qmc.scale(sample, l_bounds, u_bounds)
 
-ocp.ocp_solver.cost_set(N, "Zl", 1e7*np.ones((1,)))
+ocp.ocp_solver.cost_set(N, "Zl", 1e8*np.ones((1,)))
+ocp.ocp_solver.set(N, "p", safety_margin)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
@@ -166,10 +173,6 @@ print('Percentage of initial states in which the MPC+VBOC behaves better: ' + st
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
-# np.savez('../data/results_softterm.npz', res_steps_term=res_steps_term,
-#          better=better, worse=worse, equal=equal, times=times,
-#          dt=time_step, tot_time=tot_time)
-
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
@@ -177,6 +180,7 @@ print('Elapsed time: ' + str(end_time-start_time))
 res_arr = np.array(res_steps_term)
 idx = np.where(res_arr != tot_steps - 1)[0]
 x_init = np.asarray(x_rec)[idx]
+print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
 data_dir = '../data_3dof/'

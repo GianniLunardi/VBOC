@@ -41,7 +41,7 @@ def simulate(p):
 
         if failed_iter == 0 and f > 0:
             for i in range(1, N+1):
-                if nn_decisionfunction_conservative(params, mean, std, ocp.ocp_solver.get(i, 'x')) >= 0.:
+                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) >= 0.:
                     receiding = N - i + 1
                     x_rec = np.copy(ocp.ocp_solver.get(i, 'x'))
 
@@ -114,7 +114,7 @@ time_step = 5*1e-3
 tot_time = 0.18 - 2 * time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')

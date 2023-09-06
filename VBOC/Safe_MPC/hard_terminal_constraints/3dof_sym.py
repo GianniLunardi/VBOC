@@ -97,7 +97,7 @@ time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 
 x_sol_guess_vec = np.load('../x_sol_guess.npy')
 u_sol_guess_vec = np.load('../u_sol_guess.npy')
@@ -113,6 +113,7 @@ ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.param
 sim = SYMtriplependulum(time_step, tot_time, True)
 
 N = ocp.ocp.dims.N
+ocp.ocp_solver.set(N, 'p', safety_margin)
 
 # Generate low-discrepancy unlabeled samples:
 sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
@@ -165,10 +166,6 @@ print('Percentage of initial states in which the MPC+VBOC behaves better: ' + st
 print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
 print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
-# np.savez('../data/results_hardterm.npz', res_steps_term=res_steps_term,
-#          better=better, worse=worse, equal=equal, times=times,
-#          dt=time_step, tot_time=tot_time)
-
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
 
@@ -176,6 +173,7 @@ print('Elapsed time: ' + str(end_time-start_time))
 res_arr = np.array(res_steps_term)
 idx = np.where(res_arr != tot_steps - 1)[0]
 x_init = np.asarray(x_rec)[idx]
+print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
 data_dir = '../data_3dof/'

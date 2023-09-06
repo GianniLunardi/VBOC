@@ -149,7 +149,7 @@ print('99 percent quantile solve time: ' + str(np.quantile(times, 0.99)))
 print('Mean solve time: ' + str(np.mean(times)))
 
 print(np.array(res_steps).astype(int))
-print(np.mean(res_steps))
+print('Mean iterations: ' + str(np.mean(res_steps)))
 
 np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
 
@@ -161,6 +161,7 @@ x_arr = np.asarray(x_traj)
 res_arr = np.asarray(res_steps)
 idx = np.where(res_arr != tot_steps - 1)[0]
 x_init = x_arr[idx, res_arr[idx]]
+print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
 data_dir = '../data_3dof/'

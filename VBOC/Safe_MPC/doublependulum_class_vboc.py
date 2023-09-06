@@ -116,6 +116,7 @@ class SYMdoublependulum(MODELdoublependulum):
         sim.model = self.model
         sim.solver_options.T = self.time_step
         sim.solver_options.num_stages = 4
+        sim.parameter_values = np.array([0.])
         self.acados_integrator = AcadosSimSolver(sim, build=regenerate)
 
 
@@ -156,6 +157,8 @@ class OCPdoublependulum(MODELdoublependulum):
         self.thetamax = np.pi / 4 + np.pi
         self.thetamin = - np.pi / 4 + np.pi
         self.dthetamax = 10.
+
+        self.ocp.parameter_values = np.array([0.])
 
         self.yref = np.array([np.pi, np.pi, 0., 0., 0., 0.])
 

@@ -209,7 +209,7 @@ class OCPdoublependulum(MODELdoublependulum):
         yref = self.yref
         yref[joint] = ref
         Q = self.Q
-        Q[joint,joint] = 1e4
+        Q[joint,joint] = 1e2
         W = lin.block_diag(Q, self.R)
 
         # Set parameters, guesses and constraints:
@@ -222,6 +222,12 @@ class OCPdoublependulum(MODELdoublependulum):
         self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[self.ocp.dims.N])
         self.ocp_solver.cost_set(self.ocp.dims.N, 'yref', yref[:self.ocp.dims.nx], api='new')
         self.ocp_solver.cost_set(self.ocp.dims.N, 'W', Q, api='new')
+
+        # q_fin_lb = np.hstack([self.Xmin_limits[:2], np.zeros(2)])
+        # q_fin_ub = np.hstack([self.Xmax_limits[:2], np.zeros(2)])
+        # self.ocp_solver.constraints_set(self.ocp.dims.N, "lbx", q_fin_lb)
+        # self.ocp_solver.constraints_set(self.ocp.dims.N, "ubx", q_fin_ub)
+        # self.ocp_solver.constraints_set(self.ocp.dims.N, "uh", 1e10)
 
         # Solve the OCP:
         status = self.ocp_solver.solve()

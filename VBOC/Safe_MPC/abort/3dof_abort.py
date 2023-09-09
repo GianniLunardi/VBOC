@@ -52,7 +52,7 @@ def create_guess(x0, target):
 
 # we will have a set of x_init
 time_step = 5 * 1e-3
-tot_time = 0.2
+tot_time = 0.5
 
 # Retrieve x_init from the pickle file
 data_dir = '../data_3dof/'
@@ -72,7 +72,7 @@ nu = ocp.ocp.dims.nu
 # Check the viability
 device = torch.device("cpu")
 model = NeuralNetDIR(6, 500, 1).to(device)
-model.load_state_dict(torch.load('../model_3dof_vboc'))
+model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 
@@ -110,6 +110,8 @@ for i in range(N_a):
         x_sol[N] = ocp.ocp_solver.get(N, "x")
         solutions_x.append(x_sol)
         solutions_u.append(u_sol)
+    else:
+        print(status)
 
 print('Receding type: ', rec_type)
 print('Solved: ', np.sum(solved), '/', N_a)

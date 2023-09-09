@@ -37,7 +37,15 @@ def simulate(p):
         status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
 
-        if status != 0:
+        u0 = ocp.ocp_solver.get(0, "u")
+        sim.acados_integrator.set("u", u0)
+        sim.acados_integrator.set("x", simX[f])
+        sim.acados_integrator.solve()
+        x1 = sim.acados_integrator.get("x")
+
+        # Check if the solution is infeasible: 1) solver status, 2) u0 outside U, 3) x1 outside X
+        if status != 0 or np.all((u0 <= ocp.Cmin_limits) | (u0 >= ocp.Cmax_limits)) or \
+                np.all((x1 <= ocp.Xmin_limits) | (x1 >= ocp.Xmax_limits)):
 
             if failed_iter >= N-1 or failed_iter < 0:
                 break
@@ -53,6 +61,11 @@ def simulate(p):
 
             x_sol_guess[N-1] = np.copy(x_sol_guess[N])
 
+            sim.acados_integrator.set("u", simU[f])
+            sim.acados_integrator.set("x", simX[f])
+            sim.acados_integrator.solve()
+            simX[f+1] = sim.acados_integrator.get("x")
+
         else:
             failed_iter = 0
 
@@ -66,12 +79,7 @@ def simulate(p):
             x_sol_guess[N] = np.copy(x_sol_guess[N-1])
             u_sol_guess[N-1] = np.copy(u_sol_guess[N-2])
 
-        simU[f] += noise_vec[f]
-
-        sim.acados_integrator.set("u", simU[f])
-        sim.acados_integrator.set("x", simX[f])
-        status = sim.acados_integrator.solve()
-        simX[f+1] = sim.acados_integrator.get("x")
+            simX[f+1] = x1
 
     return f, times, simX, simU, failed_tot
 
@@ -86,7 +94,9 @@ def init_guess(p):
        
     status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
 
-    if status == 0:
+    success = 0
+    if status == 0 or status == 2:
+        success = 1
 
         for i in range(N):
             x_sol_guess[i] = ocp.ocp_solver.get(i, "x")
@@ -94,7 +104,18 @@ def init_guess(p):
 
         x_sol_guess[N] = ocp.ocp_solver.get(N, "x")
 
-    return x_sol_guess, u_sol_guess
+        if status == 2:
+            # ocp.ocp_solver.print_statistics()
+            if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
+               np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
+                print('Feasible guess')
+            else:
+                print('Infeasible guess')
+                success = 0
+                x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
+                u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
+
+    return x_sol_guess, u_sol_guess, success
 
 start_time = time.time()
 
@@ -105,7 +126,7 @@ time_step = 5*1e-3
 tot_time = 0.18
 tot_steps = 100
 
-ocp = OCPtriplependulumSTD("SQP", time_step, 0.2, True)
+ocp = OCPtriplependulumSTD("SQP", time_step, tot_time, True)
 
 # Generate low-discrepancy unlabeled samples:
 sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
@@ -119,7 +140,9 @@ N = ocp.ocp.dims.N
 with Pool(30) as p:
     res = p.map(init_guess, range(data.shape[0]))
 
-x_sol_guess_vec, u_sol_guess_vec = zip(*res)
+x_sol_guess_vec, u_sol_guess_vec, succ = zip(*res)
+
+print('Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
 
 np.save('../x_sol_guess', np.asarray(x_sol_guess_vec))
 np.save('../u_sol_guess', np.asarray(u_sol_guess_vec))

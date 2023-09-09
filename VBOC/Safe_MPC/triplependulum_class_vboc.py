@@ -221,9 +221,9 @@ class OCPtriplependulum(MODELtriplependulum):
         # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
-        self.ocp.solver_options.alpha_reduction = 0.3
-        self.ocp.solver_options.alpha_min = 1e-2
-        self.ocp.solver_options.levenberg_marquardt = 1e-2
+        # self.ocp.solver_options.alpha_reduction = 0.3
+        # self.ocp.solver_options.alpha_min = 1e-2
+        # self.ocp.solver_options.levenberg_marquardt = 1e-2
 
     def OCP_solve(self, x0, x_sol_guess, u_sol_guess, ref, joint):
         # Reset current iterate:
@@ -235,7 +235,7 @@ class OCPtriplependulum(MODELtriplependulum):
         yref = self.yref
         yref[joint] = ref
         Q = self.Q
-        Q[joint,joint] = 1e4
+        Q[joint,joint] = 5e2
         W = lin.block_diag(Q, self.R)
 
         # Set parameters, guesses and constraints:
@@ -294,7 +294,8 @@ def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
 
 
 class OCPtriplependulumHardTerm(OCPtriplependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate,
+                 json_name='acados_ocp_nlp.json', dir_name='c_generated_code'):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
@@ -307,8 +308,10 @@ class OCPtriplependulumHardTerm(OCPtriplependulum):
         # ocp model
         self.ocp.model = self.model
 
+        self.ocp.code_export_directory = dir_name
+
         # solver
-        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
+        self.ocp_solver = AcadosOcpSolver(self.ocp, json_file=json_name, build=regenerate)
 
 
 class OCPtriplependulumSoftTerm(OCPtriplependulum):
@@ -426,7 +429,7 @@ class OCPBackupController(MODELtriplependulum):
         self.ny_e = self.nx
 
         # cost
-        self.Q = 1e2 * np.diag([1e-4, 1e-4, 1e-4, 1., 1., 1.])
+        self.Q = 1e4 * np.diag([1e-4, 1e-4, 1e-4, 1., 1., 1.])
         self.R = np.diag([1e-4, 1e-4, 1e-4])
 
         self.ocp.cost.W_e = self.Q
@@ -472,31 +475,18 @@ class OCPBackupController(MODELtriplependulum):
         self.ocp.constraints.ubx_0 = self.Xmax_limits
         self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3, 4, 5])
 
-        # Final velocity constraint to be zero
+        # # Final velocity constraint to be zero
         # self.Xmax_zerovel_e = np.array([self.thetamax, self.thetamax, self.thetamax, 0., 0., 0.])
         # self.Xmin_zerovel_e = np.array([self.thetamin, self.thetamin, self.thetamin, 0., 0., 0.])
-        #
-        # self.ocp.constraints.lbx_e = self.Xmin_zerovel_e
-        # self.ocp.constraints.ubx_e = self.Xmax_zerovel_e
-        # self.ocp.constraints.idxbx_e = np.array([0, 1, 2, 3, 4, 5])
 
-        # self.ocp.constraints.idxsbx_e = np.array([0, 1, 2, 3, 4, 5])
-        #
-        # self.ocp.cost.zl_e = np.zeros((6,))
-        # self.ocp.cost.zu_e = np.zeros((6,))
-        # self.ocp.cost.Zu_e = np.zeros((6,))
-        # self.ocp.cost.Zl_e = np.zeros((6,))
-
-        C_e = np.zeros((3, 6))
-        C_e[:, :3] = np.identity(3)
-        self.ocp.constraints.C_e = C_e
-        self.ocp.constraints.lg_e = -1e1 * np.ones((3,))
-        self.ocp.constraints.ug_e = np.zeros((3,))
+        self.ocp.constraints.lbx_e = self.Xmin_limits
+        self.ocp.constraints.ubx_e = self.Xmax_limits
+        self.ocp.constraints.idxbx_e = np.array([0, 1, 2, 3, 4, 5])
 
         # options
         self.ocp.solver_options.nlp_solver_type = "SQP"
         self.ocp.solver_options.hessian_approx = 'EXACT'
-        self.ocp.solver_options.qp_solver_iter_max = 100
+        self.ocp.solver_options.qp_solver_iter_max = 200
         # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
@@ -524,13 +514,221 @@ class OCPBackupController(MODELtriplependulum):
             self.ocp_solver.set(i, 'u', u_sol_guess[i])
 
         self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[self.ocp.dims.N])
-        # self.ocp_solver.cost_set(self.ocp.dims.N, 'zl', 1e4 * np.ones(6))
-        # self.ocp_solver.cost_set(self.ocp.dims.N, 'zu', 1e4 * np.ones(6))
-        # self.ocp_solver.cost_set(self.ocp.dims.N, 'Zl', 1e6 * np.ones(6))
-        # self.ocp_solver.cost_set(self.ocp.dims.N, 'Zu', 1e6 * np.ones(6))
+
+        q_fin_lb = np.hstack([self.Xmin_limits[:3], np.zeros(3)])
+        q_fin_ub = np.hstack([self.Xmax_limits[:3], np.zeros(3)])
+        self.ocp_solver.constraints_set(self.ocp.dims.N, "lbx", q_fin_lb)
+        self.ocp_solver.constraints_set(self.ocp.dims.N, "ubx", q_fin_ub)
 
         # Solve the OCP:
         status = self.ocp_solver.solve()
 
         return status
 
+
+class OCPBackupVbocLike:
+    def __int__(self, time_step, tot_time):
+        # SET MODEL
+        model_name = 'triple_pendulum_vboc_like'
+
+        # constants
+        self.m1 = 0.4  # mass of the first link [kself.g]
+        self.m2 = 0.4  # mass of the second link [kself.g]
+        self.m3 = 0.4  # mass of the third link [kself.g]
+        self.g = 9.81  # self.gravity constant [m/s^2]
+        self.l1 = 0.8  # lenself.gth of the first link [m]
+        self.l2 = 0.8  # lenself.gth of the second link [m]
+        self.l3 = 0.8  # lenself.gth of the second link [m]
+
+        # states
+        theta1 = SX.sym("theta1")
+        theta2 = SX.sym("theta2")
+        theta3 = SX.sym("theta3")
+        dtheta1 = SX.sym("dtheta1")
+        dtheta2 = SX.sym("dtheta2")
+        dtheta3 = SX.sym("dtheta3")
+        self.x = vertcat(theta1, theta2, theta3, dtheta1, dtheta2, dtheta3)
+
+        # controls
+        C1 = SX.sym("C1")
+        C2 = SX.sym("C2")
+        C3 = SX.sym("C3")
+        u = vertcat(C1, C2, C3)
+
+        # parameters
+        w1 = SX.sym("w1")
+        w2 = SX.sym("w2")
+        w3 = SX.sym("w3")
+        p = vertcat(w1, w2, w3)
+
+        # dynamics
+        f_expl = vertcat(
+            dtheta1,
+            dtheta2,
+            dtheta3,
+            (-self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
+                -2 * theta3 + 2 * theta2 + theta1) - self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
+                2 * theta3 - 2 * theta2 + theta1) + 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                -2 * theta3 + 2 * theta2) + 2 * dtheta1 ** 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m2 * (
+                         self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) * cos(
+                -2 * theta2 + theta1 + theta3) - 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta3 + theta2 + theta1) + 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
+                -2 * theta2 + theta1 + theta3) + 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) *
+             cos(theta1 - theta3) + 2 * (C2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (
+                                self.g * self.l1 * self.m2 * (self.m2 + self.m3) * sin(
+                            -2 * theta2 + theta1) + 2 * dtheta2 ** 2 * self.l1 * self.l2 * self.m2 * (
+                                            self.m2 + self.m3) * sin(-theta2 + theta1) + self.m3 * dtheta3 ** 2 * sin(
+                            theta1 - theta3) * self.l1 * self.l3 * self.m2 + self.g * self.l1 * (
+                                            self.m2 ** 2 + (self.m3 + 2 * self.m1) * self.m2 + self.m1 * self.m3) * sin(
+                            theta1) - C1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (
+                        self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
+                    -2 * theta3 + 2 * theta2) - self.m2 ** 2 + (
+                                    -self.m3 - 2 * self.m1) * self.m2 - self.m1 * self.m3) / self.l2 / 2,
+            (-2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(
+                2 * theta1 - theta3 - theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
+                2 * theta1 - theta3 - theta2) + self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
+                theta2 + 2 * theta1 - 2 * theta3) - self.g * self.l1 * self.l3 * (
+                         (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
+                -theta2 + 2 * theta1) - 2 * dtheta2 ** 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m2 * (
+                         self.m2 + self.m3) * sin(
+                -2 * theta2 + 2 * theta1) + 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta3 + 2 * theta1) + 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m1 * self.m3 * dtheta2 ** 2 * sin(
+                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                -2 * theta3 + theta2 + theta1) + 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m1 * self.m3 * dtheta1 ** 2 * sin(
+                -2 * theta3 +
+                theta2 + theta1) - 2 * self.l1 ** 2 * self.l3 * dtheta1 ** 2 * (
+                         (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
+                -theta2 + theta1) + 2 * C3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(
+                -theta3 + theta2) + (2 * C1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (
+                        4 * dtheta3 ** 2 * self.m3 * self.l3 * (self.m1 + self.m2 / 2) * self.l2 * sin(
+                    -theta3 + theta2) + self.g * self.m3 * self.l2 * self.m1 * sin(-2 * theta3 + theta2) + self.g * (
+                                    (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (
+                                        self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * C2 * (
+                                    self.m3 + 2 * self.m1 + 2 * self.m2))) * self.l3) / (
+                        self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
+                    -2 * theta3 + 2 * theta2) + (
+                                    -self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 / self.l2 ** 2 / 2,
+            (-2 * self.m3 * C2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(
+                2 * theta1 - theta3 - theta2) + self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
+                         self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) ** 2 * cos(
+                -2 * theta2 + 2 * theta1) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
+                         self.m2 + self.m3) * sin(
+                2 * theta1 - theta3) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
+                         self.m2 + self.m3) * sin(
+                -theta3 + 2 * theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m1 * self.m3 ** 2 * dtheta3 ** 2 * sin(
+                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(
+                -2 * theta2 + theta1 + theta3) + 2 * self.m3 * dtheta1 ** 2 * self.l1 ** 2 *
+             self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(
+                        -2 * theta2 + theta1 + theta3) + 2 * self.m3 * C2 * self.l1 * self.l3 * (
+                         self.m3 + 2 * self.m1 + self.m2) * cos(-theta3 + theta2) + (self.m2 + self.m3) * (
+                         2 * C1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (
+                             -2 * self.m3 * dtheta1 ** 2 * self.l1 * self.l3 * self.m1 * sin(
+                         theta1 - theta3) - 4 * self.m3 * dtheta2 ** 2 * sin(
+                         -theta3 + theta2) * self.l2 * self.l3 * self.m1 + self.g * self.m3 * sin(
+                         theta3) * self.l3 * self.m1 - 2 * C3 * (
+                                         self.m3 + 2 * self.m1 + self.m2))) * self.l2) / self.m3 / (
+                        self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
+                    -2 * theta3 + 2 * theta2) + (
+                                    -self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 ** 2 / self.l2 / 2
+        )
+
+        self.model = AcadosModel()
+
+        self.model.f_expl_expr = f_expl
+        self.model.x = self.x
+        self.model.u = u
+        self.model.p = p
+        self.model.name = model_name
+
+        # SET OCP
+        self.ocp = AcadosOcp()
+
+        # times
+        self.ocp.solver_options.tf = tot_time
+        self.ocp.dims.N = int(tot_time / time_step)
+
+        # ocp model
+        self.ocp.model = self.model
+
+        # cost
+        self.ocp.cost.cost_type_0 = 'EXTERNAL'
+        self.ocp.cost.cost_type = 'EXTERNAL'
+
+        self.ocp.model.cost_expr_ext_cost_0 = w1 * dtheta1 + w2 * dtheta2 + w3 * dtheta3
+        self.ocp.parameter_values = np.array([0., 0., 0.])
+
+        # set constraints
+        self.Cmax = 10.
+        self.thetamax = np.pi / 4 + np.pi
+        self.thetamin = - np.pi / 4 + np.pi
+        self.dthetamax = 10.
+
+        self.Cmax_limits = np.array([self.Cmax, self.Cmax, self.Cmax])
+        self.Cmin_limits = np.array([-self.Cmax, -self.Cmax, -self.Cmax])
+        self.Xmax_limits = np.array(
+            [self.thetamax, self.thetamax, self.thetamax, self.dthetamax, self.dthetamax, self.dthetamax])
+        self.Xmin_limits = np.array(
+            [self.thetamin, self.thetamin, self.thetamin, -self.dthetamax, -self.dthetamax, -self.dthetamax])
+
+        self.ocp.constraints.lbu = self.Cmin_limits
+        self.ocp.constraints.ubu = self.Cmax_limits
+        self.ocp.constraints.idxbu = np.array([0, 1, 2])
+        self.ocp.constraints.lbx = self.Xmin_limits
+        self.ocp.constraints.ubx = self.Xmax_limits
+        self.ocp.constraints.idxbx = np.array([0, 1, 2, 3, 4, 5])
+
+        self.ocp.constraints.lbx_e = self.Xmin_limits
+        self.ocp.constraints.ubx_e = self.Xmax_limits
+        self.ocp.constraints.idxbx_e = np.array([0, 1, 2, 3, 4, 5])
+
+        self.ocp.constraints.lbx_0 = self.Xmin_limits
+        self.ocp.constraints.ubx_0 = self.Xmax_limits
+        self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3, 4, 5])
+
+        self.ocp.constraints.C = np.zeros((3, 6))
+        self.ocp.constraints.D = np.zeros((3, 3))
+        self.ocp.constraints.lg = np.zeros((3,))
+        self.ocp.constraints.ug = np.zeros((3,))
+
+        # options
+        self.ocp.solver_options.nlp_solver_type = "SQP"
+        self.ocp.solver_options.hessian_approx = 'EXACT'
+        self.ocp.solver_options.exact_hess_constr = 0
+        # self.ocp.solver_options.exact_hess_cost = 0
+        self.ocp.solver_options.exact_hess_dyn = 0
+        self.ocp.solver_options.nlp_solver_tol_stat = 1e-3
+        self.ocp.solver_options.qp_solver_tol_stat = 1e-3
+        self.ocp.solver_options.qp_solver_iter_max = 100
+        self.ocp.solver_options.nlp_solver_max_iter = 1000
+        self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
+        self.ocp.solver_options.alpha_reduction = 0.3
+        self.ocp.solver_options.alpha_min = 1e-2
+        self.ocp.solver_options.levenberg_marquardt = 1e-5
+
+        # OCP solver
+        self.ocp_solver = AcadosOcpSolver(self.ocp, build=True)
+
+    def OCP_solve(self, x_sol_guess, u_sol_guess, p):
+        # Reset current iterate:
+        self.ocp_solver.reset()
+
+        # Set parameters, guesses and constraints:
+        for i in range(self.ocp.dims.N):
+            self.ocp_solver.set(i, 'x', x_sol_guess[i])
+            self.ocp_solver.set(i, 'u', u_sol_guess[i])
+            self.ocp_solver.set(i, 'p', p)
+
+        self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[-1])
+        self.ocp_solver.set(self.ocp.dims.N, 'p', p)
+
+        q_fin_lb = np.hstack([self.Xmin_limits[:3], np.zeros(3)])
+        q_fin_ub = np.hstack([self.Xmax_limits[:3], np.zeros(3)])
+        self.ocp_solver.constraints_set(self.ocp.dims.N, "lbx", q_fin_lb)
+        self.ocp_solver.constraints_set(self.ocp.dims.N, "ubx", q_fin_ub)
+
+        # Solve the OCP:
+        status = self.ocp_solver.solve()
+
+        return status

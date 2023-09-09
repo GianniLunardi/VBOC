@@ -1,7 +1,7 @@
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSim, AcadosSimSolver
 import numpy as np
 from acados_template import AcadosModel
-from casadi import SX, vertcat, cos, sin, fmax, norm_2, if_else, DM
+from casadi import SX, vertcat, cos, sin, fmax, norm_2, Function, rootfinder
 import scipy.linalg as lin
 
 
@@ -197,7 +197,7 @@ class OCPdoublependulum(MODELdoublependulum):
         self.ocp.solver_options.alpha_reduction = 0.3
         self.ocp.solver_options.alpha_min = 1e-2
         self.ocp.solver_options.levenberg_marquardt = 1e-2
-        # self.ocp.solver_options.nlp_solver_ext_qp_res = 1
+        # self.ocp.solver_options.regularize_method = 'PROJECT'
 
     def OCP_solve(self, x0, x_sol_guess, u_sol_guess, ref, joint):
         # Reset current iterate:
@@ -494,3 +494,86 @@ class OCPBackupController(MODELdoublependulum):
         status = self.ocp_solver.solve()
 
         return status
+
+
+class GravityCompensation:
+    def __init__(self):
+
+        # constants
+        self.m1 = 0.4  # mass of the first link [kg]
+        self.m2 = 0.4  # mass of the second link [kg]
+        self.g = 9.81  # self.gravity constant [m/s^2]
+        self.l1 = 0.8  # length of the first link [m]
+        self.l2 = 0.8  # length of the second link [m]
+
+        # states
+        theta1 = SX.sym("theta1")
+        theta2 = SX.sym("theta2")
+        dtheta1 = 0
+        dtheta2 = 0
+        x = vertcat(theta1, theta2)
+
+        # controls
+        C1 = SX.sym("C1")
+        C2 = SX.sym("C2")
+        z = vertcat(C1, C2)
+
+        # parameters
+        self.p = SX.sym("safe")
+
+        # dynamics
+        f_expl = vertcat(
+            (
+                    self.l1 ** 2
+                    * self.l2
+                    * self.m2
+                    * dtheta1 ** 2
+                    * sin(-2 * theta2 + 2 * theta1)
+                    + 2 * C2 * cos(-theta2 + theta1) * self.l1
+                    + 2
+                    * (
+                            self.g * sin(-2 * theta2 + theta1) * self.l1 * self.m2 / 2
+                            + sin(-theta2 + theta1) * dtheta2 ** 2 * self.l1 * self.l2 * self.m2
+                            + self.g * self.l1 * (self.m1 + self.m2 / 2) * sin(theta1)
+                            - C1
+                    )
+                    * self.l2
+            )
+            / self.l1 ** 2
+            / self.l2
+            / (self.m2 * cos(-2 * theta2 + 2 * theta1) - 2 * self.m1 - self.m2),
+            (
+                    -self.g
+                    * self.l1
+                    * self.l2
+                    * self.m2
+                    * (self.m1 + self.m2)
+                    * sin(-theta2 + 2 * theta1)
+                    - self.l1
+                    * self.l2 ** 2
+                    * self.m2 ** 2
+                    * dtheta2 ** 2
+                    * sin(-2 * theta2 + 2 * theta1)
+                    - 2
+                    * dtheta1 ** 2
+                    * self.l1 ** 2
+                    * self.l2
+                    * self.m2
+                    * (self.m1 + self.m2)
+                    * sin(-theta2 + theta1)
+                    + 2 * C1 * cos(-theta2 + theta1) * self.l2 * self.m2
+                    + self.l1
+                    * (self.m1 + self.m2)
+                    * (sin(theta2) * self.g * self.l2 * self.m2 - 2 * C2)
+            )
+            / self.l2 ** 2
+            / self.l1
+            / self.m2
+            / (self.m2 * cos(-2 * theta2 + 2 * theta1) - 2 * self.m1 - self.m2)
+        )
+
+        f_impl = Function('f_impl', [z, x], [f_expl])
+        self.f_root = rootfinder('f_root', 'newton', f_impl)
+
+    def solve(self, x0, z_guess=(1., 1.)):
+        return self.f_root(z_guess, x0).T

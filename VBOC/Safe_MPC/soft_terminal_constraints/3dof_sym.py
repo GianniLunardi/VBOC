@@ -32,57 +32,58 @@ def simulate(p):
     x_sol_guess = x_sol_guess_vec[p]
     u_sol_guess = u_sol_guess_vec[p]
 
-    x_rec = np.copy(x0)
+    x_temp = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
+    u_temp = np.empty((N, ocp.ocp.dims.nu)) * np.nan
+
+    x_viable = np.copy(x0)
 
     for f in range(tot_steps):
        
         status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
-        slack = ocp.ocp_solver.get(N, "sl")
 
-        if status != 0:
+        for i in range(N):
+            x_temp[i] = ocp.ocp_solver.get(i, "x")
+            u_temp[i] = ocp.ocp_solver.get(i, "u")
 
-            if failed_iter >= N-1 or failed_iter < 0:
+        x_temp[N] = ocp.ocp_solver.get(N, "x")
+
+        # Check if the solution is infeasible: 1) solver status, 2,3) x_temp, u_temp in bounds 4) viability constraint
+        if status != 0 or np.any((x_temp < ocp.Xmin_limits) | (x_temp > ocp.Xmax_limits)) or \
+           np.any((u_temp < ocp.Cmin_limits) | (u_temp > ocp.Cmax_limits)) or \
+           nn_decisionfunction_conservative(list(model.parameters()), mean, std, safety_margin, x_temp[N]) < 0.0:
+
+            # Compute safe abort trajectory, starting from the last viable state
+            if failed_iter == 0:
+                x_viable = np.copy(x_sol_guess[-2])
+
+            # Follow safe abort trajectory
+            if failed_iter >= N:
                 break
 
             failed_iter += 1
             failed_tot += 1
-
             simU[f] = u_sol_guess[0]
-
-            for i in range(N-1):
-                x_sol_guess[i] = np.copy(x_sol_guess[i+1])
-                u_sol_guess[i] = np.copy(u_sol_guess[i+1])
-
-            x_sol_guess[N-1] = np.copy(x_sol_guess[N])
+            x_sol_guess = np.roll(x_sol_guess, -1, axis=0)
+            u_sol_guess = np.roll(u_sol_guess, -1, axis=0)
 
         else:
             failed_iter = 0
-
             simU[f] = ocp.ocp_solver.get(0, "u")
+            x_sol_guess = np.roll(x_temp, -1, axis=0)
+            u_sol_guess = np.roll(u_temp, -1, axis=0)
 
-            for i in range(N-1):
-                x_sol_guess[i] = ocp.ocp_solver.get(i+1, "x")
-                u_sol_guess[i] = ocp.ocp_solver.get(i+1, "u")
-
-            x_sol_guess[N-1] = ocp.ocp_solver.get(N, "x")
-            x_sol_guess[N] = np.copy(x_sol_guess[N-1])
-            u_sol_guess[N-1] = np.copy(u_sol_guess[N-2])
-            decision = nn_decisionfunction_conservative(list(model.parameters()), mean, std,
-                                                        safety_margin, ocp.ocp_solver.get(N, "x"))
-            if slack < 1e-9:
-                x_rec = np.copy(ocp.ocp_solver.get(N, "x"))
-                print('p: ' + str(p) + ' f: ' + str(f) + ' slack: ' + str(slack) + ' decision: ' + str(decision))
-                print(ocp.ocp_solver.get_residuals())
-
-        simU[f] += noise_vec[f]
+        # Copy the last elements of the guess
+        x_sol_guess[-1] = np.copy(x_sol_guess[-2])
+        u_sol_guess[-1] = np.copy(u_sol_guess[-2])
 
         sim.acados_integrator.set("u", simU[f])
         sim.acados_integrator.set("x", simX[f])
-        status = sim.acados_integrator.solve()
+        sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU, failed_tot, x_rec
+    return f, times, simX, simU, failed_tot, x_viable
+
 
 start_time = time.time()
 
@@ -90,34 +91,26 @@ start_time = time.time()
 device = torch.device("cpu") 
 
 model = NeuralNetDIR(6, 500, 1).to(device)
-model.load_state_dict(torch.load('../model_3dof_vboc'))
+model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 safety_margin = 5.0
 
 cpu_num = 1
 test_num = 100
-
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = False
-
-x_sol_guess_vec = np.load('../x_sol_guess.npy')
-u_sol_guess_vec = np.load('../u_sol_guess.npy')
-noise_vec = np.load('../noise.npy')
-# joint_vec = np.load('../selected_joint.npy')
-#
-# quant = 10.
-# r = 1
-#
-# while quant > time_step - 1e-3:
+regenerate = True
+x_sol_guess_vec = np.load('../x_sol_guess_viable.npy')
+u_sol_guess_vec = np.load('../u_sol_guess_viable.npy')
 
 ocp = OCPtriplependulumSoftTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, True)
-
 N = ocp.ocp.dims.N
+ocp.ocp_solver.cost_set(N, "Zl", 1e8*np.ones((1,)))
+ocp.ocp_solver.set(N, "p", safety_margin)
 
 # Generate low-discrepancy unlabeled samples:
 sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
@@ -125,9 +118,6 @@ sample = sampler.random(n=test_num)
 l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
 u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
 data = qmc.scale(sample, l_bounds, u_bounds)
-
-ocp.ocp_solver.cost_set(N, "Zl", 1e8*np.ones((1,)))
-ocp.ocp_solver.set(N, "p", safety_margin)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
@@ -139,20 +129,11 @@ times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)
-
-# print('iter: ', str(r))
 print('tot time: ' + str(tot_time))
 print('99 percent quantile solve time: ' + str(quant))
-print('Mean solve time: ' + str(np.mean(times)))
-
-# tot_time -= time_step
-# r += 1
-
+print('Mean iterations: ' + str(np.mean(res_steps_term)))
 print(np.array(res_steps_term).astype(int))
-
 del ocp
-
-np.save('res_steps_softterm.npy', np.array(res_steps_term).astype(int))
 
 res_steps = np.load('../no_constraints/res_steps_noconstr.npy')
 

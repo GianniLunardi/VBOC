@@ -4,15 +4,18 @@ sys.path.insert(1, os.getcwd() + '/..')
 
 import numpy as np
 import time
-from triplependulum_class_vboc import OCPtriplependulumSTD, SYMtriplependulum, create_guess
+import torch
+from triplependulum_class_vboc import OCPtriplependulumSoftTerm, SYMtriplependulum, nn_decisionfunction_conservative
+from my_nn import NeuralNetDIR
+from multiprocessing import Pool
 from scipy.stats import qmc
 import pickle
 
 import warnings
 warnings.filterwarnings("ignore")
 
-def simulate(p):
 
+def simulate(p):
     x0 = np.zeros((ocp.ocp.dims.nx,))
     x0[:ocp.ocp.dims.nu] = data[p]
 
@@ -30,8 +33,8 @@ def simulate(p):
     u_sol_guess = u_sol_guess_vec[p]
 
     for f in range(tot_steps):
-       
-        status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
+
+        status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax - 0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
 
         u0 = ocp.ocp_solver.get(0, "u")
@@ -75,50 +78,33 @@ def simulate(p):
 
     return f, times, simX, simU, failed_tot
 
-def init_guess(p):
-
-    x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
-
-    # Create initial guess
-    x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
-       
-    status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
-    success = 0
-    solver_fails = 0
-
-    if status == 0 or status == 2:
-
-        for i in range(N):
-            x_sol_guess[i] = ocp.ocp_solver.get(i, "x")
-            u_sol_guess[i] = ocp.ocp_solver.get(i, "u")
-
-        x_sol_guess[N] = ocp.ocp_solver.get(N, "x")
-
-        if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
-           np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
-            success = 1
-        else:
-            success = 0
-            x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
-            u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
-
-    else:
-        solver_fails += 1
-    print('Solver fails: ' + str(solver_fails))
-
-    return x_sol_guess, u_sol_guess, success
 
 start_time = time.time()
 
+# Pytorch params:
+device = torch.device("cpu") 
+
+model = NeuralNetDIR(6, 500, 1).to(device)
+model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
+mean = torch.load('../mean_3dof_vboc')
+std = torch.load('../std_3dof_vboc')
+safety_margin = 5.0
+
+cpu_num = 1
 test_num = 100
 time_step = 5*1e-3
-tot_time = 0.18
+tot_time = 0.18 - time_step
 tot_steps = 100
 
+regenerate = True
+x_sol_guess_vec = np.load('../x_sol_guess_viable.npy')
+u_sol_guess_vec = np.load('../u_sol_guess_viable.npy')
+
+ocp = OCPtriplependulumSoftTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, True)
-ocp = OCPtriplependulumSTD("SQP", time_step, tot_time, True)
-x_ref = np.array([ocp.thetamax-0.05, np.pi, np.pi, 0, 0, 0])
+N = ocp.ocp.dims.N
+ocp.ocp_solver.cost_set(N, "Zl", 1e8*np.ones((1,)))
+ocp.ocp_solver.set(N, "p", safety_margin)
 
 # Generate low-discrepancy unlabeled samples:
 sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
@@ -127,36 +113,40 @@ l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
 u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
 data = qmc.scale(sample, l_bounds, u_bounds)
 
-N = ocp.ocp.dims.N
-
-res = []
-for i in range(data.shape[0]):
-    res.append(init_guess(i))
-
-x_sol_guess_vec, u_sol_guess_vec, succ = zip(*res)
-print('Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
-
-del ocp
-ocp = OCPtriplependulumSTD("SQP_RTI", time_step, tot_time, True)
-
-N = ocp.ocp.dims.N
-
 # MPC controller without terminal constraints:
-res = []
-for i in range(data.shape[0]):
-    res.append(simulate(i))
+with Pool(cpu_num) as p:
+    res = p.map(simulate, range(data.shape[0]))
 
-res_steps, stats, x_traj, u_traj, failed = zip(*res)
+res_steps_term, stats, x_traj, u_traj, failed = zip(*res)
 
 times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
 
-print('99 percent quantile solve time: ' + str(np.quantile(times, 0.99)))
+quant = np.quantile(times, 0.99)
+print('tot time: ' + str(tot_time))
+print('99 percent quantile solve time: ' + str(quant))
+print('Mean iterations: ' + str(np.mean(res_steps_term)))
+print(np.array(res_steps_term).astype(int))
+del ocp
 
-print(np.array(res_steps).astype(int))
-print('Mean iterations: ' + str(np.mean(res_steps)))
+res_steps = np.load('../no_constraints/res_steps_noconstr.npy')
 
-np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
+better = 0
+equal = 0
+worse = 0
+
+for i in range(res_steps.shape[0]):
+    if res_steps_term[i]-res_steps[i]>0:
+        better += 1
+    elif res_steps_term[i]-res_steps[i]==0:
+        equal += 1
+    else:
+        worse += 1
+
+print('MPC standard vs MPC with soft term constraints (STRAIGHT)')
+print('Percentage of initial states in which the MPC+VBOC behaves better: ' + str(better))
+print('Percentage of initial states in which the MPC+VBOC behaves equal: ' + str(equal))
+print('Percentage of initial states in which the MPC+VBOC behaves worse: ' + str(worse))
 
 end_time = time.time()
 print('Elapsed time: ' + str(end_time-start_time))
@@ -170,14 +160,17 @@ print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
 data_dir = '../data_3dof/'
-with open(data_dir + 'results_no_constraint.pkl', 'wb') as f:
+with open(data_dir + 'results_softstraight.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times
     all_data['dt'] = time_step
     all_data['tot_time'] = tot_time
-    all_data['res_steps'] = res_steps
+    all_data['res_steps'] = res_steps_term
     all_data['failed'] = failed
     all_data['x_init'] = x_init
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
+    all_data['better'] = better
+    all_data['worse'] = worse
+    all_data['equal'] = equal
     pickle.dump(all_data, f)

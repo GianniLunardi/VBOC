@@ -5,12 +5,12 @@ sys.path.insert(1, os.getcwd() + '/..')
 import numpy as np
 import time
 import torch
-from triplependulum_class_vboc import OCPtriplependulumHardTerm, SYMtriplependulum, nn_decisionfunction_conservative
+from triplependulum_class_vboc import OCPtriplependulumHardTerm, SYMtriplependulum, \
+    nn_decisionfunction_conservative, create_guess
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 from scipy.stats import qmc
 import pickle
-import matplotlib.pyplot as plt
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -33,10 +33,10 @@ def simulate(p):
     x_sol_guess = x_sol_guess_vec[p]
     u_sol_guess = u_sol_guess_vec[p]
 
-    x_traj = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
-    u_traj = np.empty((N, ocp.ocp.dims.nu)) * np.nan
+    x_temp = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
+    u_temp = np.empty((N, ocp.ocp.dims.nu)) * np.nan
 
-    x_rec = np.copy(x0)
+    x_viable = np.copy(x0)
 
     for f in range(tot_steps):
        
@@ -44,46 +44,46 @@ def simulate(p):
         times[f] = ocp.ocp_solver.get_stats('time_tot')
 
         for i in range(N):
-            x_traj[i] = ocp.ocp_solver.get(i, "x")
-            u_traj[i] = ocp.ocp_solver.get(i, "u")
+            x_temp[i] = ocp.ocp_solver.get(i, "x")
+            u_temp[i] = ocp.ocp_solver.get(i, "u")
 
-        x_traj[N] = ocp.ocp_solver.get(N, "x")
+        x_temp[N] = ocp.ocp_solver.get(N, "x")
 
-        # Check if the solution is infeasible: 1) solver status, 2,3) x_traj, u_traj in bounds 4) viability constraint
-        if status != 0 or np.any((x_traj < ocp.Xmin_limits) | (x_traj > ocp.Xmax_limits)) or \
-           np.any((u_traj < ocp.Cmin_limits) | (u_traj > ocp.Cmax_limits)) or \
-           nn_decisionfunction_conservative(list(model.parameters()), mean, std, safety_margin, x_traj[N]) < 0.0:
+        # Check if the solution is infeasible: 1) solver status, 2,3) x_temp, u_temp in bounds 4) viability constraint
+        if status != 0 or np.any((x_temp < ocp.Xmin_limits) | (x_temp > ocp.Xmax_limits)) or \
+           np.any((u_temp < ocp.Cmin_limits) | (u_temp > ocp.Cmax_limits)) or \
+           nn_decisionfunction_conservative(list(model.parameters()), mean, std, safety_margin, x_temp[N]) < 0.0:
 
-            if failed_iter >= N-1 or failed_iter < 0:
+            # Compute safe abort trajectory, starting from the last viable state
+            if failed_iter == 0:
+                x_viable = np.copy(x_sol_guess[-2])
+
+            # Follow safe abort trajectory
+            if failed_iter >= N:
                 break
 
             failed_iter += 1
             failed_tot += 1
-
             simU[f] = u_sol_guess[0]
-
             x_sol_guess = np.roll(x_sol_guess, -1, axis=0)
             u_sol_guess = np.roll(u_sol_guess, -1, axis=0)
-            x_sol_guess[-1] = np.copy(x_sol_guess[-2])
-            u_sol_guess[-1] = np.copy(u_sol_guess[-2])
 
         else:
             failed_iter = 0
-
             simU[f] = ocp.ocp_solver.get(0, "u")
+            x_sol_guess = np.roll(x_temp, -1, axis=0)
+            u_sol_guess = np.roll(u_temp, -1, axis=0)
 
-            x_sol_guess = np.roll(x_traj, -1, axis=0)
-            u_sol_guess = np.roll(u_traj, -1, axis=0)
-            x_sol_guess[-1] = np.copy(x_sol_guess[-2])
-            u_sol_guess[-1] = np.copy(u_sol_guess[-2])
-            x_rec = np.copy(x_traj[N])
+        # Copy the last elements of the guess
+        x_sol_guess[-1] = np.copy(x_sol_guess[-2])
+        u_sol_guess[-1] = np.copy(u_sol_guess[-2])
 
         sim.acados_integrator.set("u", simU[f])
         sim.acados_integrator.set("x", simX[f])
-        status = sim.acados_integrator.solve()
+        sim.acados_integrator.solve()
         simX[f+1] = sim.acados_integrator.get("x")
 
-    return f, times, simX, simU, failed_tot, x_rec
+    return f, times, simX, simU, failed_tot, x_viable
 
 
 def init_guess(p):
@@ -91,17 +91,13 @@ def init_guess(p):
     x0[:ocp.ocp.dims.nu] = data[p]
 
     # Guess:
-    x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
-    u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
+    x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
 
-    ocp.ocp_solver.constraints_set(N, "uh", np.array([1e9]))
     status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax - 0.05, 0)
-    print('p: ' + str(p))
-    ocp.ocp_solver.print_statistics()
-
     success = 0
+    solver_fails = 0
+
     if status == 0 or status == 2:
-        success = 1
 
         for i in range(N):
             x_sol_guess[i] = ocp.ocp_solver.get(i, "x")
@@ -109,18 +105,16 @@ def init_guess(p):
 
         x_sol_guess[N] = ocp.ocp_solver.get(N, "x")
 
-        if status == 2:
-            # ocp.ocp_solver.print_statistics()
-            if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
-                    np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
-                print('Feasible guess')
-            else:
-                print('Infeasible guess')
-                success = 0
-                x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
-                u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
-    # else:
-    #     print(status)
+        if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
+           np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
+            success = 1
+        else:
+            success = 0
+            x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
+
+    else:
+        solver_fails += 1
+    print('Solver fails: ' + str(solver_fails))
 
     return x_sol_guess, u_sol_guess, success
 
@@ -131,22 +125,22 @@ start_time = time.time()
 device = torch.device("cpu") 
 
 model = NeuralNetDIR(6, 500, 1).to(device)
-model.load_state_dict(torch.load('../model_3dof_vboc'))
+model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 safety_margin = 5.0
 
 cpu_num = 1
 test_num = 100
-
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = False
-
+regenerate = True
+sim = SYMtriplependulum(time_step, tot_time, True)
 ocp = OCPtriplependulumHardTerm("SQP", time_step, tot_time, list(model.parameters()), mean, std, regenerate,
                                 "acados_ocp_init_guess.json", "c_generated_guess")
+x_ref = np.array([ocp.thetamax-0.05, np.pi, np.pi, 0, 0, 0])
 
 # Generate low-discrepancy unlabeled samples:
 sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
@@ -168,10 +162,7 @@ np.save('../x_sol_guess_viable', np.asarray(x_sol_guess_vec))
 np.save('../u_sol_guess_viable', np.asarray(u_sol_guess_vec))
 
 del ocp
-
 ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
-sim = SYMtriplependulum(time_step, tot_time, True)
-
 ocp.ocp_solver.set(N, 'p', safety_margin)
 
 # MPC controller without terminal constraints:
@@ -184,20 +175,11 @@ times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)
-
-# print('iter: ', str(r))
 print('tot time: ' + str(tot_time))
 print('99 percent quantile solve time: ' + str(quant))
-print('Mean solve time: ' + str(np.mean(times)))
-
-# tot_time -= time_step
-# r += 1
-
+print('Mean iterations: ' + str(np.mean(res_steps_term)))
 print(np.array(res_steps_term).astype(int))
-
 del ocp
-
-np.save('res_steps_hardterm.npy', np.array(res_steps_term).astype(int))
 
 res_steps = np.load('../no_constraints/res_steps_noconstr.npy')
 

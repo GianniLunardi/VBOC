@@ -221,9 +221,9 @@ class OCPtriplependulum(MODELtriplependulum):
         # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
-        # self.ocp.solver_options.alpha_reduction = 0.3
-        # self.ocp.solver_options.alpha_min = 1e-2
-        # self.ocp.solver_options.levenberg_marquardt = 1e-2
+        self.ocp.solver_options.alpha_reduction = 0.3
+        self.ocp.solver_options.alpha_min = 1e-2
+        self.ocp.solver_options.levenberg_marquardt = 1e-2
 
     def OCP_solve(self, x0, x_sol_guess, u_sol_guess, ref, joint):
         # Reset current iterate:
@@ -291,6 +291,37 @@ def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
         it += 1
 
     return out * (100 - safety_margin) / 100 - vel_norm
+
+def linear_sat(u, u_bar):
+    dim = len(u)
+    u_sat = np.zeros(dim)
+    for i in range(dim):
+        if u[i] < - u_bar:
+            u_sat[i] = -u_bar
+        elif u[i] > u_bar:
+            u_sat[i] = u_bar
+        else:
+            u_sat[i] = u[i]
+    return u_sat
+
+def create_guess(sim, ocp, x0, target):
+    kp = 1e-2 * np.eye(3)
+    kd = 1e2 * np.eye(3)
+    N = ocp.ocp.dims.N
+    simX = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
+    simU = np.empty((N, ocp.ocp.dims.nu)) * np.nan
+    simX[0] = np.copy(x0)
+    for i in range(N):
+        simU[i] = linear_sat(kp.dot(target[:3] - simX[i,:3]) + kd.dot(target[3:] - simX[i,3:]), ocp.Cmax)
+        sim.acados_integrator.set("u", simU[i])
+        sim.acados_integrator.set("x", simX[i])
+        status = sim.acados_integrator.solve()
+        simX[i + 1] = sim.acados_integrator.get("x")
+    # Then saturate the state
+    for i in range(N):
+        simX[i,:3] = linear_sat(simX[i,:3], ocp.thetamax)
+        simX[i,3:] = linear_sat(simX[i,3:], ocp.dthetamax)
+    return simX, simU
 
 
 class OCPtriplependulumHardTerm(OCPtriplependulum):

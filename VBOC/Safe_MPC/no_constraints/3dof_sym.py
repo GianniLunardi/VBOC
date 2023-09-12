@@ -6,15 +6,17 @@ import numpy as np
 import time
 from triplependulum_class_vboc import OCPtriplependulumSTD, SYMtriplependulum, create_guess
 from scipy.stats import qmc
+from multiprocessing import Pool
 import pickle
 
 import warnings
 warnings.filterwarnings("ignore")
 
+
 def simulate(p):
 
     x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
+    x0[:ocp.ocp.dims.nu] = x0_vec[p]
 
     simX = np.empty((tot_steps + 1, ocp.ocp.dims.nx)) * np.nan
     simU = np.empty((tot_steps, ocp.ocp.dims.nu)) * np.nan
@@ -78,7 +80,7 @@ def simulate(p):
 def init_guess(p):
 
     x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
+    x0[:ocp.ocp.dims.nu] = x0_vec[p]
 
     # Create initial guess
     x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
@@ -104,47 +106,43 @@ def init_guess(p):
             u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
 
     else:
-        solver_fails += 1
-    print('Solver fails: ' + str(solver_fails))
+        solver_fails = 1
 
-    return x_sol_guess, u_sol_guess, success
+    return x_sol_guess, u_sol_guess, success, solver_fails
 
 start_time = time.time()
-
-test_num = 100
+cpu_num = 1
 time_step = 5*1e-3
 tot_time = 0.18
 tot_steps = 100
+
+folder = '../viable_init/'
+x0_vec = np.load(folder + 'initial_conditions.npy')
+test_num = len(x0_vec)
 
 sim = SYMtriplependulum(time_step, tot_time, True)
 ocp = OCPtriplependulumSTD("SQP", time_step, tot_time, True)
 x_ref = np.array([ocp.thetamax-0.05, np.pi, np.pi, 0, 0, 0])
 
-# Generate low-discrepancy unlabeled samples:
-sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-sample = sampler.random(n=test_num)
-l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-data = qmc.scale(sample, l_bounds, u_bounds)
-
 N = ocp.ocp.dims.N
 
-res = []
-for i in range(data.shape[0]):
-    res.append(init_guess(i))
+with Pool(30) as p:
+    res = p.map(init_guess, range(test_num))
 
-x_sol_guess_vec, u_sol_guess_vec, succ = zip(*res)
+x_sol_guess_vec, u_sol_guess_vec, succ, fails = zip(*res)
 print('Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
+print('Init guess fails: ' + str(np.sum(fails)) + ' over ' + str(test_num))
+
+# np.save('../x_sol_guess', np.asarray(x_sol_guess_vec))
+# np.save('../u_sol_guess', np.asarray(u_sol_guess_vec))
 
 del ocp
 ocp = OCPtriplependulumSTD("SQP_RTI", time_step, tot_time, True)
-
 N = ocp.ocp.dims.N
 
 # MPC controller without terminal constraints:
-res = []
-for i in range(data.shape[0]):
-    res.append(simulate(i))
+with Pool(cpu_num) as p:
+    res = p.map(simulate, range(test_num))
 
 res_steps, stats, x_traj, u_traj, failed = zip(*res)
 
@@ -152,10 +150,8 @@ times = np.array([i for f in stats for i in f ])
 times = times[~np.isnan(times)]
 
 print('99 percent quantile solve time: ' + str(np.quantile(times, 0.99)))
-
 print(np.array(res_steps).astype(int))
 print('Mean iterations: ' + str(np.mean(res_steps)))
-
 np.save('res_steps_noconstr.npy', np.array(res_steps).astype(int))
 
 end_time = time.time()

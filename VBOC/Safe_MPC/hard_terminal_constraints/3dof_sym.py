@@ -6,7 +6,7 @@ import numpy as np
 import time
 import torch
 from triplependulum_class_vboc import OCPtriplependulumHardTerm, SYMtriplependulum, \
-    nn_decisionfunction_conservative, create_guess
+    nn_decisionfunction_conservative
 from my_nn import NeuralNetDIR
 from multiprocessing import Pool
 from scipy.stats import qmc
@@ -15,10 +15,11 @@ import pickle
 import warnings
 warnings.filterwarnings("ignore")
 
-def simulate(p):
+
+def simulate(k):
 
     x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
+    x0[:ocp.ocp.dims.nu] = x0_vec[k]
 
     simX = np.empty((tot_steps + 1, ocp.ocp.dims.nx)) * np.nan
     simU = np.empty((tot_steps, ocp.ocp.dims.nu)) * np.nan
@@ -30,8 +31,8 @@ def simulate(p):
     failed_tot = 0
 
     # Guess:
-    x_sol_guess = x_sol_guess_vec[p]
-    u_sol_guess = u_sol_guess_vec[p]
+    x_sol_guess = x_sol_guess_vec[k]
+    u_sol_guess = u_sol_guess_vec[k]
 
     x_temp = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
     u_temp = np.empty((N, ocp.ocp.dims.nu)) * np.nan
@@ -86,39 +87,6 @@ def simulate(p):
     return f, times, simX, simU, failed_tot, x_viable
 
 
-def init_guess(p):
-    x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
-
-    # Guess:
-    x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
-
-    status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax - 0.05, 0)
-    success = 0
-    solver_fails = 0
-
-    if status == 0 or status == 2:
-
-        for i in range(N):
-            x_sol_guess[i] = ocp.ocp_solver.get(i, "x")
-            u_sol_guess[i] = ocp.ocp_solver.get(i, "u")
-
-        x_sol_guess[N] = ocp.ocp_solver.get(N, "x")
-
-        if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
-           np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
-            success = 1
-        else:
-            success = 0
-            x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
-
-    else:
-        solver_fails += 1
-    print('Solver fails: ' + str(solver_fails))
-
-    return x_sol_guess, u_sol_guess, success
-
-
 start_time = time.time()
 
 # Pytorch params:
@@ -131,47 +99,30 @@ std = torch.load('../std_3dof_vboc')
 safety_margin = 5.0
 
 cpu_num = 1
-test_num = 100
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
 regenerate = True
-sim = SYMtriplependulum(time_step, tot_time, True)
-ocp = OCPtriplependulumHardTerm("SQP", time_step, tot_time, list(model.parameters()), mean, std, regenerate,
-                                "acados_ocp_init_guess.json", "c_generated_guess")
-x_ref = np.array([ocp.thetamax-0.05, np.pi, np.pi, 0, 0, 0])
-
-# Generate low-discrepancy unlabeled samples:
-sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-sample = sampler.random(n=test_num)
-l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-data = qmc.scale(sample, l_bounds, u_bounds)
-
+sim = SYMtriplependulum(time_step, tot_time, regenerate)
+ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 N = ocp.ocp.dims.N
 ocp.ocp_solver.set(N, 'p', safety_margin)
 
-with Pool(30) as p:
-    res = p.map(init_guess, range(data.shape[0]))
+folder = '../viable_init/'
+x0_vec = np.load(folder + 'initial_conditions.npy')
+x_sol_guess_vec = np.load(folder + 'x_sol_guess_viable.npy')
+u_sol_guess_vec = np.load(folder + 'u_sol_guess_viable.npy')
 
-x_sol_guess_vec, u_sol_guess_vec, succ = zip(*res)
-print('Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
-
-np.save('../x_sol_guess_viable', np.asarray(x_sol_guess_vec))
-np.save('../u_sol_guess_viable', np.asarray(u_sol_guess_vec))
-
-del ocp
-ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
-ocp.ocp_solver.set(N, 'p', safety_margin)
+test_num = len(x_sol_guess_vec)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
-    res = p.map(simulate, range(data.shape[0]))
+    res = p.map(simulate, range(test_num))
 
 res_steps_term, stats, x_traj, u_traj, failed, x_rec = zip(*res)
 
-times = np.array([i for f in stats for i in f ])
+times = np.array([i for f in stats for i in f])
 times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)

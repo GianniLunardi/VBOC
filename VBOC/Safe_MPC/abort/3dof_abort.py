@@ -91,9 +91,8 @@ for i in range(N_a):
     x0 = np.copy(x_init[i])
 
     # PID guess
-    # x_ref = np.array([np.pi, np.pi, np.pi, 0., 0., 0.])
+    x_ref = np.array([np.pi, np.pi, np.pi, 0., 0., 0.])
     # x_ref = np.hstack([x0[:3], np.zeros(3)])
-    x_ref = np.zeros(6)
     x_guess, u_guess = create_guess(x0, x_ref)
 
     status = ocp.OCP_solve(x0, x_guess, u_guess)

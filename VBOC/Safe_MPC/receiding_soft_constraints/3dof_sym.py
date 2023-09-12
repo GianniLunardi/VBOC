@@ -15,10 +15,10 @@ import pickle
 import warnings
 warnings.filterwarnings("ignore")
 
-def simulate(p):
+def simulate(k):
 
     x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
+    x0[:ocp.ocp.dims.nu] = x0_vec[k]
 
     simX = np.empty((tot_steps + 1, ocp.ocp.dims.nx)) * np.nan
     simU = np.empty((tot_steps, ocp.ocp.dims.nu)) * np.nan
@@ -30,69 +30,62 @@ def simulate(p):
     failed_tot = 0
 
     # Guess:
-    x_sol_guess = x_sol_guess_vec[p]
-    u_sol_guess = u_sol_guess_vec[p]
+    x_sol_guess = x_sol_guess_vec[k]
+    u_sol_guess = u_sol_guess_vec[k]
 
-    x_temp = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
-    u_temp = np.empty((N, ocp.ocp.dims.nu)) * np.nan
+    x_opt = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
+    u_opt = np.empty((N, ocp.ocp.dims.nu)) * np.nan
 
-    receiding = N
+    r = N
     sanity_check = 0
-    x_viable = np.copy(x0)
+    x_viable = np.copy(x_sol_guess[-1])
 
     for f in range(tot_steps):
 
-        # Set the receding and terminal constraint (soft)
-        for i in range(1, N+1):
-            if i == receiding:
-                # Receding constraint
-                ocp.ocp_solver.cost_set(i, "Zl", 1e8*np.ones((1,)))
-                # if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) < 0. and failed_iter == 0:
-                #     sanity_check += 1
-            elif i == N:
-                # Terminal constraint
-                ocp.ocp_solver.cost_set(i, "Zl", 1e5*np.ones((1,)))
-            else:
-                # No constraints on other runnung states
+        # Terminal constraint
+        ocp.ocp_solver.cost_set(N, "Zl", 1e5 * np.ones((1,)))
+        # Receding constraint
+        ocp.ocp_solver.cost_set(r, "Zl", 1e8 * np.ones((1,)))
+        for i in range(1, N):
+            if i != r:
+                # No constraints on other running states
                 ocp.ocp_solver.cost_set(i, "Zl", np.zeros((1,)))
-       
+
+        # Solve the OCP
         status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
 
         for i in range(N):
-            x_temp[i] = ocp.ocp_solver.get(i, "x")
-            u_temp[i] = ocp.ocp_solver.get(i, "u")
+            x_opt[i] = ocp.ocp_solver.get(i, "x")
+            u_opt[i] = ocp.ocp_solver.get(i, "u")
 
-        x_temp[N] = ocp.ocp_solver.get(N, "x")
+        x_opt[N] = ocp.ocp_solver.get(N, "x")
 
-        # Check if the solution is infeasible: 1) solver status, 2,3) x_temp, u_temp in bounds 4) viability constraint
-        if status != 0 or np.any((x_temp < ocp.Xmin_limits) | (x_temp > ocp.Xmax_limits)) or \
-           np.any((u_temp < ocp.Cmin_limits) | (u_temp > ocp.Cmax_limits)) or \
-           nn_decisionfunction_conservative(list(model.parameters()), mean, std, safety_margin, x_temp[receiding]) < 0.0:
+        r_new = -1
+        for i in range(1, N + 1):
+            if nn_decisionfunction_conservative(params, mean, std, safety_margin, x_opt[i]) >= 0.:
+                r_new = i - 1
 
-            # Compute safe abort trajectory, starting from the last viable state
-            if failed_iter == 0:
-                x_viable = np.copy(x_sol_guess[receiding])
-
+        # Check if the solution is feasible: 1) solver status, 2,3) x_opt, u_opt in bounds 4) viability constraint ok
+        if status == 0 and np.all((x_opt >= ocp.Xmin_limits) & (x_opt <= ocp.Xmax_limits)) and \
+           np.all((u_opt >= ocp.Cmin_limits) & (u_opt <= ocp.Cmax_limits)) and r_new > 0:
+            failed_iter = 0
+            r = r_new
+            simU[f] = u_opt[0]
+            x_sol_guess = np.roll(x_opt, -1, axis=0)
+            u_sol_guess = np.roll(u_opt, -1, axis=0)
+        else:
             # Follow safe abort trajectory
-            if failed_iter >= N:
+            if r == 1:
+                x_viable = np.copy(x_sol_guess[r])
                 break
 
             failed_iter += 1
             failed_tot += 1
+            r -= 1
             simU[f] = u_sol_guess[0]
-            receiding -= 1
             x_sol_guess = np.roll(x_sol_guess, -1, axis=0)
             u_sol_guess = np.roll(u_sol_guess, -1, axis=0)
-
-        else:
-            failed_iter = 0
-            for i in range(1, N+1):
-                if nn_decisionfunction_conservative(params, mean, std, safety_margin, ocp.ocp_solver.get(i, 'x')) >= 0.:
-                    receiding = i - 1
-            simU[f] = ocp.ocp_solver.get(0, "u")
-            x_sol_guess = np.roll(x_temp, -1, axis=0)
-            u_sol_guess = np.roll(u_temp, -1, axis=0)
 
         # Copy the last elements of the guess
         x_sol_guess[-1] = np.copy(x_sol_guess[-2])
@@ -117,32 +110,27 @@ std = torch.load('../std_3dof_vboc')
 safety_margin = 5.0
 
 cpu_num = 20
-test_num = 100
 time_step = 5*1e-3
 tot_time = 0.18 - 2 * time_step
 tot_steps = 100
 
 regenerate = True
-x_sol_guess_vec = np.load('../x_sol_guess_viable.npy')
-u_sol_guess_vec = np.load('../u_sol_guess_viable.npy')
-
 params = list(model.parameters())
 ocp = OCPtriplependulumReceidingSoft("SQP_RTI", time_step, tot_time, params, mean, std, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, regenerate)
 N = ocp.ocp.dims.N
-# ocp.ocp_solver.cost_set(N, "Zl", 1e5*np.ones((1,)))
 ocp.ocp_solver.set(N, "p", safety_margin)
 
-# Generate low-discrepancy unlabeled samples:
-sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-sample = sampler.random(n=test_num)
-l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-data = qmc.scale(sample, l_bounds, u_bounds)
+folder = '../viable_init/'
+x0_vec = np.load(folder + 'initial_conditions.npy')
+x_sol_guess_vec = np.load(folder + 'x_sol_guess_viable.npy')
+u_sol_guess_vec = np.load(folder + 'u_sol_guess_viable.npy')
+
+test_num = len(x_sol_guess_vec)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
-    res = p.map(simulate, range(data.shape[0]))
+    res = p.map(simulate, range(test_num))
 
 res_steps_traj, stats, x_traj, u_traj, sanity, failed, x_rec = zip(*res)
 
@@ -154,8 +142,8 @@ print('tot time: ' + str(tot_time))
 print('99 percent quantile solve time: ' + str(quant))
 print('Mean iterations: ' + str(np.mean(res_steps_traj)))
 print(np.array(res_steps_traj).astype(int))
-print("Sanity check: ")
-print(np.array(sanity).astype(int))
+# print("Sanity check: ")
+# print(np.array(sanity).astype(int))
 del ocp
 
 res_steps = np.load('../no_constraints/res_steps_noconstr.npy')

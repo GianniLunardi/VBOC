@@ -14,10 +14,11 @@ import pickle
 import warnings
 warnings.filterwarnings("ignore")
 
-def simulate(p):
+
+def simulate(k):
 
     x0 = np.zeros((ocp.ocp.dims.nx,))
-    x0[:ocp.ocp.dims.nu] = data[p]
+    x0[:ocp.ocp.dims.nu] = x0_vec[k]
 
     simX = np.empty((tot_steps + 1, ocp.ocp.dims.nx)) * np.nan
     simU = np.empty((tot_steps, ocp.ocp.dims.nu)) * np.nan
@@ -29,8 +30,8 @@ def simulate(p):
     failed_tot = 0
 
     # Guess:
-    x_sol_guess = x_sol_guess_vec[p]
-    u_sol_guess = u_sol_guess_vec[p]
+    x_sol_guess = x_sol_guess_vec[k]
+    u_sol_guess = u_sol_guess_vec[k]
 
     x_temp = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
     u_temp = np.empty((N, ocp.ocp.dims.nu)) * np.nan
@@ -97,35 +98,32 @@ std = torch.load('../std_3dof_vboc')
 safety_margin = 5.0
 
 cpu_num = 1
-test_num = 100
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = True
-x_sol_guess_vec = np.load('../x_sol_guess_viable.npy')
-u_sol_guess_vec = np.load('../u_sol_guess_viable.npy')
-
-ocp = OCPtriplependulumSoftTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
-sim = SYMtriplependulum(time_step, tot_time, True)
+regenerate = False
+ocp = OCPtriplependulumSoftTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate,
+                                json_name='acados_softconstr.json', dir_name='c_code_softconstr')
+sim = SYMtriplependulum(time_step, tot_time, regenerate)
 N = ocp.ocp.dims.N
-ocp.ocp_solver.cost_set(N, "Zl", 1e8*np.ones((1,)))
 ocp.ocp_solver.set(N, "p", safety_margin)
+ocp.ocp_solver.cost_set(N, "Zl", 1e8*np.ones((1,)))
 
-# Generate low-discrepancy unlabeled samples:
-sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
-sample = sampler.random(n=test_num)
-l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
-u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
-data = qmc.scale(sample, l_bounds, u_bounds)
+folder = '../viable_init/'
+x0_vec = np.load(folder + 'initial_conditions.npy')
+x_sol_guess_vec = np.load(folder + 'x_sol_guess_viable.npy')
+u_sol_guess_vec = np.load(folder + 'u_sol_guess_viable.npy')
+
+test_num = len(x_sol_guess_vec)
 
 # MPC controller without terminal constraints:
 with Pool(cpu_num) as p:
-    res = p.map(simulate, range(data.shape[0]))
+    res = p.map(simulate, range(test_num))
 
 res_steps_term, stats, x_traj, u_traj, failed, x_rec = zip(*res)
 
-times = np.array([i for f in stats for i in f ])
+times = np.array([i for f in stats for i in f])
 times = times[~np.isnan(times)]
 
 quant = np.quantile(times, 0.99)

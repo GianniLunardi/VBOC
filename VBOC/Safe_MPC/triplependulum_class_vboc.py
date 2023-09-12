@@ -221,9 +221,9 @@ class OCPtriplependulum(MODELtriplependulum):
         # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
         self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
-        self.ocp.solver_options.alpha_reduction = 0.3
-        self.ocp.solver_options.alpha_min = 1e-2
-        self.ocp.solver_options.levenberg_marquardt = 1e-2
+        # self.ocp.solver_options.alpha_reduction = 0.3
+        # self.ocp.solver_options.alpha_min = 1e-2
+        # self.ocp.solver_options.levenberg_marquardt = 1e-2
 
     def OCP_solve(self, x0, x_sol_guess, u_sol_guess, ref, joint):
         # Reset current iterate:
@@ -334,11 +334,10 @@ class OCPtriplependulumHardTerm(OCPtriplependulum):
         self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
-        self.ocp.constraints.uh_e = np.array([1e6])
+        self.ocp.constraints.uh_e = np.array([1e4])
 
         # ocp model
         self.ocp.model = self.model
-
         self.ocp.code_export_directory = dir_name
 
         # solver
@@ -346,7 +345,8 @@ class OCPtriplependulumHardTerm(OCPtriplependulum):
 
 
 class OCPtriplependulumSoftTerm(OCPtriplependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate,
+                 json_name='acados_ocp_nlp.json', dir_name='c_generated_code'):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
@@ -354,7 +354,7 @@ class OCPtriplependulumSoftTerm(OCPtriplependulum):
         self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
-        self.ocp.constraints.uh_e = np.array([1e6])
+        self.ocp.constraints.uh_e = np.array([1e4])
 
         self.ocp.constraints.idxsh_e = np.array([0])
 
@@ -365,9 +365,10 @@ class OCPtriplependulumSoftTerm(OCPtriplependulum):
 
         # ocp model
         self.ocp.model = self.model
+        self.ocp.code_export_directory = dir_name
 
         # solver
-        self.ocp_solver = AcadosOcpSolver(self.ocp, build=regenerate)
+        self.ocp_solver = AcadosOcpSolver(self.ocp, json_file=json_name, build=regenerate)
 
 
 class OCPtriplependulumReceidingSoft(OCPtriplependulum):
@@ -558,7 +559,7 @@ class OCPBackupController(MODELtriplependulum):
 
 
 class OCPBackupVbocLike:
-    def __int__(self, time_step, tot_time):
+    def __init__(self, time_step, tot_time):
         # SET MODEL
         model_name = 'triple_pendulum_vboc_like'
 
@@ -685,7 +686,6 @@ class OCPBackupVbocLike:
 
         # cost
         self.ocp.cost.cost_type_0 = 'EXTERNAL'
-        self.ocp.cost.cost_type = 'EXTERNAL'
 
         self.ocp.model.cost_expr_ext_cost_0 = w1 * dtheta1 + w2 * dtheta2 + w3 * dtheta3
         self.ocp.parameter_values = np.array([0., 0., 0.])
@@ -718,15 +718,15 @@ class OCPBackupVbocLike:
         self.ocp.constraints.ubx_0 = self.Xmax_limits
         self.ocp.constraints.idxbx_0 = np.array([0, 1, 2, 3, 4, 5])
 
-        self.ocp.constraints.C = np.zeros((3, 6))
-        self.ocp.constraints.D = np.zeros((3, 3))
-        self.ocp.constraints.lg = np.zeros((3,))
-        self.ocp.constraints.ug = np.zeros((3,))
+        self.ocp.constraints.C = np.zeros((4, 6))
+        self.ocp.constraints.D = np.zeros((4, 3))
+        self.ocp.constraints.lg = np.zeros((4,))
+        self.ocp.constraints.ug = np.zeros((4,))
 
         # options
         self.ocp.solver_options.nlp_solver_type = "SQP"
         self.ocp.solver_options.hessian_approx = 'EXACT'
-        self.ocp.solver_options.exact_hess_constr = 0
+        # self.ocp.solver_options.exact_hess_constr = 0
         # self.ocp.solver_options.exact_hess_cost = 0
         self.ocp.solver_options.exact_hess_dyn = 0
         self.ocp.solver_options.nlp_solver_tol_stat = 1e-3
@@ -741,7 +741,7 @@ class OCPBackupVbocLike:
         # OCP solver
         self.ocp_solver = AcadosOcpSolver(self.ocp, build=True)
 
-    def OCP_solve(self, x_sol_guess, u_sol_guess, p):
+    def OCP_solve(self, x0, x_sol_guess, u_sol_guess, p, v_norm):
         # Reset current iterate:
         self.ocp_solver.reset()
 
@@ -751,13 +751,27 @@ class OCPBackupVbocLike:
             self.ocp_solver.set(i, 'u', u_sol_guess[i])
             self.ocp_solver.set(i, 'p', p)
 
-        self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[-1])
-        self.ocp_solver.set(self.ocp.dims.N, 'p', p)
+        C = np.zeros((4, 6))
+        d = np.array([p.tolist()])
+        C[:3, 3:] = np.eye(3) - np.matmul(d.T, d)
+        C[3, 3:] = d
+
+        # norm(v0) <= v_norm only for time step 0
+        ug = np.zeros((4,))
+        ug[-1] = v_norm
+        self.ocp_solver.constraints_set(0, "ug", ug)
+
+        q_init_lb = np.hstack([x0[:3], self.Xmin_limits[3:]])
+        q_init_ub = np.hstack([x0[:3], self.Xmax_limits[3:]])
+        self.ocp_solver.constraints_set(0, "lbx", q_init_lb)
+        self.ocp_solver.constraints_set(0, "ubx", q_init_ub)
 
         q_fin_lb = np.hstack([self.Xmin_limits[:3], np.zeros(3)])
         q_fin_ub = np.hstack([self.Xmax_limits[:3], np.zeros(3)])
         self.ocp_solver.constraints_set(self.ocp.dims.N, "lbx", q_fin_lb)
         self.ocp_solver.constraints_set(self.ocp.dims.N, "ubx", q_fin_ub)
+        self.ocp_solver.set(self.ocp.dims.N, 'x', x_sol_guess[-1])
+        self.ocp_solver.set(self.ocp.dims.N, 'p', p)
 
         # Solve the OCP:
         status = self.ocp_solver.solve()

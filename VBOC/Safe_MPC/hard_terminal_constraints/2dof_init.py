@@ -24,8 +24,8 @@ def linear_sat(u, u_bar):
     return res
 
 def create_guess(x0, target):
-    kp = 1e2 * np.eye(2)
-    kd = 1e2 * np.eye(2)
+    kp = 1e0 * np.eye(2)
+    kd = 1e3 * np.eye(2)
     simX = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
     simU = np.empty((N, ocp.ocp.dims.nu)) * np.nan
     simX[0] = np.copy(x0)
@@ -45,14 +45,14 @@ def create_guess(x0, target):
 def init_guess(p):
     x0 = np.zeros((ocp.ocp.dims.nx,))
     x0[:ocp.ocp.dims.nu] = data[p]
-    # u0 = g.solve(data[p])
-    # u0 = np.zeros(2)
+    u0 = g.solve(data[p])
 
     # Guess:
     # x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
     # u_sol_guess = np.full((N, ocp.ocp.dims.nu), u0)
 
     x_sol_guess, u_sol_guess = create_guess(x0, x_ref)
+    u_sol_guess += np.full((N, ocp.ocp.dims.nu), u0)
 
     status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax - 0.05, 0)
 
@@ -65,7 +65,6 @@ def init_guess(p):
 
     success = 0
     if status == 0 or status == 2:
-        success = 1
 
         for i in range(N):
             x_sol_guess[i] = ocp.ocp_solver.get(i, "x")
@@ -73,16 +72,13 @@ def init_guess(p):
 
         x_sol_guess[N] = ocp.ocp_solver.get(N, "x")
 
-        if status == 2:
-            # ocp.ocp_solver.print_statistics()
-            if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
-                    np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
-                print('Feasible guess')
-            else:
-                print('Infeasible guess')
-                success = 0
-                x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
-                u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
+        if np.all((x_sol_guess >= ocp.Xmin_limits) & (x_sol_guess <= ocp.Xmax_limits)) and \
+                np.all((u_sol_guess >= ocp.Cmin_limits) & (u_sol_guess <= ocp.Cmax_limits)):
+            success = 1
+        else:
+            success = 0
+            x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0)
+            u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
     else:
         print(status)
         ocp.ocp_solver.print_statistics()
@@ -111,10 +107,10 @@ tot_steps = 100
 regenerate = False
 g = GravityCompensation()
 
-# ocp = OCPdoublependulumHardTerm("SQP", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
-ocp = OCPdoublependulumSoftTerm("SQP", time_step, tot_time, list(model.parameters()), mean, std, safety_margin, regenerate)
+ocp = OCPdoublependulumHardTerm("SQP", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
+# ocp = OCPdoublependulumSoftTerm("SQP", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 N = ocp.ocp.dims.N
-# ocp.ocp_solver.set(N, 'p', safety_margin)
+ocp.ocp_solver.set(N, 'p', safety_margin)
 sim = SYMdoublependulum(time_step, tot_time, True)
 
 x_ref = np.array([ocp.thetamax - 0.05, np.pi, 0., 0.])
@@ -126,7 +122,7 @@ l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
 u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
 data = qmc.scale(sample, l_bounds, u_bounds)
 
-ocp.ocp_solver.cost_set(N, "Zl", 1e6*np.ones((1,)))
+# ocp.ocp_solver.cost_set(N, "Zl", 1e6*np.ones((1,)))
 
 res = []
 for i in range(data.shape[0]):

@@ -55,12 +55,16 @@ time_step = 5 * 1e-3
 tot_time = 0.5
 
 # Retrieve x_init from the pickle file
-data_dir = '../data_3dof/'
-rec_type = 'receiding_softsoft'  # receiding_hardsoft, receiding_softsoft, softterm, hardterm, no_constraint
+data_dir = '../data_3dof_safety_2/'
+rec_type = 'receiding_softsoft'  # receiding_softsoft, softterm, hardterm
 with open(data_dir + 'results_' + rec_type + '.pkl', 'rb') as f:
     data_rec = pickle.load(f)
 x_init = data_rec['x_init']
+res_steps = np.asarray(data_rec['res_steps'])
+# idx = data_rec['idx_to_abort']
+# idx = np.where(res_steps != len(res_steps) - 1)[0]
 N_a = x_init.shape[0]
+print(N_a)
 
 ocp = OCPBackupVbocLike(time_step, tot_time)
 sim = SYMtriplependulum(time_step, tot_time, True)
@@ -80,8 +84,8 @@ viability = np.zeros(N_a)
 for i in range(N_a):
     viability[i] = check_viability(x_init[i])
 
-print(N_a)
-print('Viability: ', viability)
+# print(N_a)
+# print('Viability: ', viability)
 
 # Solve the safe abort problem
 solved = np.zeros(N_a)
@@ -91,6 +95,8 @@ solutions_u = []
 times = np.empty(N_a) * np.nan
 
 for i in range(N_a):
+
+    # if i in idx:
     x0 = np.copy(x_init[i])
 
     # PID guess
@@ -115,12 +121,44 @@ for i in range(N_a):
         solutions_u.append(u_sol)
     else:
         print(status)
+        solutions_x.append(np.empty((N+1, nx)) * np.nan)
+        solutions_u.append(np.empty((N, nu)) * np.nan)
+    # else:
+    #     solutions_x.append(np.empty((N + 1, nx)) * np.nan)
+    #     solutions_u.append(np.empty((N, nu)) * np.nan)
 
 print('Receding type: ', rec_type)
 print('Solved: ', np.sum(solved), '/', N_a)
 print('Average CPU time: ', np.mean(times))
 print(ocp.thetamax)
-np.set_printoptions(precision=3, suppress=True)
-for i in range(N_a):
-    print('x0: ', x_init[i], 'solved: ', solved[i], 'viability: ', viability[i])
+# np.set_printoptions(precision=3, suppress=True)
+# for i in range(N_a):
+#     print('x0: ', x_init[i], 'solved: ', solved[i], 'viability: ', viability[i])
 
+# Verify the norm of the velocity
+counter = np.zeros(N_a)
+for i in range(N_a):
+    if solved[i] == 1 :
+        norm_init = np.linalg.norm(x_init[i, 3:])
+        norm_sol = np.linalg.norm(solutions_x[i][0, 3:])
+        diff = norm_init - norm_sol
+        # should be abs in the future
+        perc = diff / norm_init * 100
+        # print("Difference btw initial velocity norms (at iter ", i, ") ", diff)
+        # print("Relative error in percentage: ", perc)
+        if diff < 0.1:
+            counter[i] = 1
+
+print('Number of acceptable solution: ', np.sum(counter), 'over ', np.sum(solved))
+
+# Compute mean and max time for the computations, only if the problem is solved
+mean_time = np.mean(times[np.where(counter == 1)])
+max_time = np.max(times[np.where(counter == 1)])
+print('Mean time: ', mean_time)
+print('Max time: ', max_time)
+
+with open(data_dir + 'safe_traj_' + rec_type + '.pkl', 'wb') as f:
+    all_data = dict()
+    # all_data['idx'] = idx[np.where(counter == 1)]
+    all_data['safe_traj'] = solutions_x
+    pickle.dump(all_data, f)

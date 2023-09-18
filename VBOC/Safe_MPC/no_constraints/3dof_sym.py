@@ -165,7 +165,7 @@ x_init = x_arr[idx, res_arr[idx]]
 print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
-data_dir = '../data_3dof/'
+data_dir = '../data_3dof_safety_10/'
 with open(data_dir + 'results_no_constraint.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times

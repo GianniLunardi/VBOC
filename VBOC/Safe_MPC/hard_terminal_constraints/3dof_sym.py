@@ -37,9 +37,13 @@ def simulate(k):
     x_temp = np.empty((N + 1, ocp.ocp.dims.nx)) * np.nan
     u_temp = np.empty((N, ocp.ocp.dims.nu)) * np.nan
 
-    x_viable = np.copy(x0)
+    x_viable = np.copy(x_sol_guess[-1])
 
     for f in range(tot_steps):
+
+        # nn_out = nn_decisionfunction_conservative(list(model.parameters()), mean, std, safety_margin, x_sol_guess[-1])
+        # if nn_out < 0.0:
+        #     print('Viable state not found at k = %d, f = %d, out = %.4f: ' % (k, f, nn_out))
        
         status = ocp.OCP_solve(simX[f], x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
         times[f] = ocp.ocp_solver.get_stats('time_tot')
@@ -58,9 +62,14 @@ def simulate(k):
             # Compute safe abort trajectory, starting from the last viable state
             if failed_iter == 0:
                 x_viable = np.copy(x_sol_guess[-2])
+                # print(nn_decisionfunction_conservative(list(model.parameters()), mean, std, safety_margin, x_viable))
 
             # Follow safe abort trajectory
-            if failed_iter >= N:
+            if failed_iter >= N-1:
+                # sanity check
+                if np.linalg.norm(x_viable - simX[f]) > 1e-3:
+                    print('f: ', f)
+                    print("ERROR: x_viable and simX[f] are different", x_viable, simX[f])
                 break
 
             failed_iter += 1
@@ -96,14 +105,14 @@ model = NeuralNetDIR(6, 500, 1).to(device)
 model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
-safety_margin = 5.0
+safety_margin = 10.0
 
-cpu_num = 1
+cpu_num = 10
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 sim = SYMtriplependulum(time_step, tot_time, regenerate)
 ocp = OCPtriplependulumHardTerm("SQP_RTI", time_step, tot_time, list(model.parameters()), mean, std, regenerate)
 N = ocp.ocp.dims.N
@@ -161,7 +170,7 @@ x_init = np.asarray(x_rec)[idx]
 print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
-data_dir = '../data_3dof/'
+data_dir = '../data_3dof_safety_10/'
 with open(data_dir + 'results_hardterm.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times

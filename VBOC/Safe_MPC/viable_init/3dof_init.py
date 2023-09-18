@@ -4,6 +4,7 @@ sys.path.insert(1, os.getcwd() + '/..')
 
 import numpy as np
 import time
+import random
 import torch
 from triplependulum_class_vboc import OCPtriplependulumHardTerm, SYMtriplependulum, \
     nn_decisionfunction_conservative, create_guess
@@ -56,10 +57,9 @@ model = NeuralNetDIR(6, 500, 1).to(device)
 model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
-safety_margin = 5.0
 
 cpu_num = 30
-test_num = 300
+test_num = 350
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
@@ -74,23 +74,51 @@ sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
 sample = sampler.random(n=test_num)
 l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
 u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
+# if safety_margin == 10:
+#     data = qmc.scale(sample, l_bounds, u_bounds)
+# else:
+#     data = np.load('initial_conditions_10.npy')
 data = qmc.scale(sample, l_bounds, u_bounds)
 
 N = ocp.ocp.dims.N
+safety_margin = 10
 ocp.ocp_solver.set(N, 'p', safety_margin)
 
 with Pool(cpu_num) as p:
     res = p.map(init_guess, range(data.shape[0]))
 
-x_sol_guess_vec, u_sol_guess_vec, succ = zip(*res)
-print('Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
+x_sol_guess_vec_10, u_sol_guess_vec_10, succ = zip(*res)
+print('Safet = 10, Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
 
 test_wanted = 100
-succ_arr = np.asarray(succ)
-idx = np.where(succ_arr == 1)[0][:test_wanted]
+succ_10 = np.asarray(succ)
+idx_10 = np.where(succ_10 == 1)[0]
+
+safety_margin = 2
+ocp.ocp_solver.set(N, 'p', safety_margin)
+
+with Pool(cpu_num) as p:
+    res = p.map(init_guess, range(data.shape[0]))
+
+x_sol_guess_vec_2, u_sol_guess_vec_2, succ = zip(*res)
+print('Safety = 2, Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
+
+succ_2 = np.asarray(succ)
+idx_2 = np.where(succ_2 == 1)[0]
+
+idx_common = np.random.choice(np.intersect1d(idx_10, idx_2), test_wanted, replace=False)
+print(len(idx_common))
+
+# temp = np.where(succ_arr == 1)[0][:test_wanted]
+# if len(temp) > test_wanted:
+#     idx = np.random.choice(temp, test_wanted, replace=False)
+# else:
+#     print("Not enough sample!")
 
 # Save the initial guess
-np.save('initial_conditions.npy', data[idx])
-np.save('x_sol_guess_viable.npy', np.array(x_sol_guess_vec)[idx])
-np.save('u_sol_guess_viable.npy', np.array(u_sol_guess_vec)[idx])
+np.save('initial_conditions.npy', data[idx_common])
+np.save('x_sol_guess_viable_2.npy', np.array(x_sol_guess_vec_2)[idx_common])
+np.save('u_sol_guess_viable_2.npy', np.array(u_sol_guess_vec_2)[idx_common])
+np.save('x_sol_guess_viable_10.npy', np.array(x_sol_guess_vec_10)[idx_common])
+np.save('u_sol_guess_viable_10.npy', np.array(u_sol_guess_vec_10)[idx_common])
 

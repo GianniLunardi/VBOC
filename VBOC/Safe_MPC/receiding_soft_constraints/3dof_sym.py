@@ -107,14 +107,14 @@ model = NeuralNetDIR(6, 500, 1).to(device)
 model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
-safety_margin = 5.0
+safety_margin = 2.0
 
 cpu_num = 20
 time_step = 5*1e-3
 tot_time = 0.18 - 2 * time_step
 tot_steps = 100
 
-regenerate = True
+regenerate = False
 params = list(model.parameters())
 ocp = OCPtriplependulumReceidingSoft("SQP_RTI", time_step, tot_time, params, mean, std, regenerate)
 sim = SYMtriplependulum(time_step, tot_time, regenerate)
@@ -122,9 +122,9 @@ N = ocp.ocp.dims.N
 ocp.ocp_solver.set(N, "p", safety_margin)
 
 folder = '../viable_init/'
-x0_vec = np.load(folder + 'initial_conditions.npy')
-x_sol_guess_vec = np.load(folder + 'x_sol_guess_viable.npy')
-u_sol_guess_vec = np.load(folder + 'u_sol_guess_viable.npy')
+x0_vec = np.load(folder + 'initial_conditions_2.npy')
+x_sol_guess_vec = np.load(folder + 'x_sol_guess_viable_2.npy')
+u_sol_guess_vec = np.load(folder + 'u_sol_guess_viable_2.npy')
 
 test_num = len(x_sol_guess_vec)
 
@@ -175,7 +175,7 @@ x_init = np.asarray(x_rec)[idx]
 print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
-data_dir = '../data_3dof/'
+data_dir = '../data_3dof_safety_2/'
 with open(data_dir + 'results_receiding_softsoft.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times

@@ -88,7 +88,7 @@ model = NeuralNetDIR(6, 500, 1).to(device)
 model.load_state_dict(torch.load('../model_3dof_vboc', map_location=device))
 mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
-safety_margin = 5.0
+safety_margin = 10.0
 
 cpu_num = 1
 time_step = 5*1e-3
@@ -150,13 +150,13 @@ print('Elapsed time: ' + str(end_time-start_time))
 
 # Compute the x_init
 x_arr = np.asarray(x_traj)
-res_arr = np.asarray(res_steps)
+res_arr = np.asarray(res_steps_term)
 idx = np.where(res_arr != tot_steps - 1)[0]
 x_init = x_arr[idx, res_arr[idx]]
 print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
 # Save pickle file
-data_dir = '../data_3dof/'
+data_dir = '../data_3dof_safety_10/'
 with open(data_dir + 'results_softstraight.pkl', 'wb') as f:
     all_data = dict()
     all_data['times'] = times

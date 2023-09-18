@@ -286,12 +286,12 @@ class OCPdoublependulumHardTerm(OCPdoublependulum):
 
 
 class OCPdoublependulumSoftTerm(OCPdoublependulum):
-    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, safety_margin, regenerate):
+    def __init__(self, nlp_solver_type, time_step, tot_time, nn_params, mean, std, regenerate):
         # inherit initialization
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, safety_margin, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
         self.ocp.constraints.uh_e = np.array([1e6])

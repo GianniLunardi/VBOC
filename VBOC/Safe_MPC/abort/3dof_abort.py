@@ -55,8 +55,8 @@ time_step = 5 * 1e-3
 tot_time = 0.5
 
 # Retrieve x_init from the pickle file
-data_dir = '../data_3dof/'
-rec_type = 'receiding_softsoft'  # receiding_hardsoft, receiding_softsoft, softterm, hardterm, no_constraint
+data_dir = '../data_3dof_safety_2/'
+rec_type = 'receiding_softsoft'  # receiding_softsoft, softterm, hardterm
 with open(data_dir + 'results_' + rec_type + '.pkl', 'rb') as f:
     data_rec = pickle.load(f)
 x_init = data_rec['x_init']
@@ -115,8 +115,9 @@ for i in range(N_a):
 print('Receding type: ', rec_type)
 print('Solved: ', np.sum(solved), '/', N_a)
 print('Average CPU time: ', np.mean(times))
-print(ocp.thetamax)
+print('Max CPU time: ', np.max(times))
+print(times)
 np.set_printoptions(precision=3, suppress=True)
-for i in range(N_a):
-    print('x0: ', x_init[i], 'solved: ', solved[i], 'viability: ', viability[i])
+# for i in range(N_a):
+#     print('x0: ', x_init[i], 'solved: ', solved[i], 'viability: ', viability[i])
 

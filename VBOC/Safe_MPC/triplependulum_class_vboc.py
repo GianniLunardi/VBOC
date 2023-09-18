@@ -518,9 +518,9 @@ class OCPBackupController(MODELtriplependulum):
         # options
         self.ocp.solver_options.nlp_solver_type = "SQP"
         self.ocp.solver_options.hessian_approx = 'EXACT'
-        self.ocp.solver_options.qp_solver_iter_max = 200
+        self.ocp.solver_options.qp_solver_iter_max = 100
         # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
-        self.ocp.solver_options.nlp_solver_max_iter = 1000
+        # self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
         self.ocp.solver_options.alpha_reduction = 0.3
         self.ocp.solver_options.alpha_min = 1e-2
@@ -687,7 +687,7 @@ class OCPBackupVbocLike:
         # cost
         self.ocp.cost.cost_type_0 = 'EXTERNAL'
 
-        self.ocp.model.cost_expr_ext_cost_0 = w1 * dtheta1 + w2 * dtheta2 + w3 * dtheta3
+        self.ocp.model.cost_expr_ext_cost_0 = -(w1 * dtheta1 + w2 * dtheta2 + w3 * dtheta3)
         self.ocp.parameter_values = np.array([0., 0., 0.])
 
         # set constraints
@@ -726,8 +726,8 @@ class OCPBackupVbocLike:
         # options
         self.ocp.solver_options.nlp_solver_type = "SQP"
         self.ocp.solver_options.hessian_approx = 'EXACT'
-        # self.ocp.solver_options.exact_hess_constr = 0
-        # self.ocp.solver_options.exact_hess_cost = 0
+        self.ocp.solver_options.exact_hess_constr = 0
+        self.ocp.solver_options.exact_hess_cost = 0
         self.ocp.solver_options.exact_hess_dyn = 0
         self.ocp.solver_options.nlp_solver_tol_stat = 1e-3
         self.ocp.solver_options.qp_solver_tol_stat = 1e-3
@@ -750,11 +750,16 @@ class OCPBackupVbocLike:
             self.ocp_solver.set(i, 'x', x_sol_guess[i])
             self.ocp_solver.set(i, 'u', u_sol_guess[i])
             self.ocp_solver.set(i, 'p', p)
+            self.ocp_solver.constraints_set(i, 'C', np.zeros((4, 6)))
+            self.ocp_solver.constraints_set(i, 'D', np.zeros((4, 3)))
+            self.ocp_solver.constraints_set(i, 'lg', np.zeros((4,)))
+            self.ocp_solver.constraints_set(i, 'ug', np.zeros((4,)))
 
         C = np.zeros((4, 6))
         d = np.array([p.tolist()])
         C[:3, 3:] = np.eye(3) - np.matmul(d.T, d)
         C[3, 3:] = d
+        self.ocp_solver.constraints_set(0, "C", C, api='new')
 
         # norm(v0) <= v_norm only for time step 0
         ug = np.zeros((4,))

@@ -5,7 +5,7 @@
 *.npy
 *.json
 *.txt
-**/c_generated_code/
+**/c_*/
 mean_*
 model_*
 std_*

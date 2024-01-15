@@ -28,8 +28,8 @@ def simulate(p):
     failed_tot = 0
 
     # Guess:
-    x_sol_guess = x_sol_guess_vec[p]
-    u_sol_guess = u_sol_guess_vec[p]
+    x_sol_guess = np.copy(x_sol_guess_vec[p])
+    u_sol_guess = np.copy(u_sol_guess_vec[p])
 
     for f in range(tot_steps):
        
@@ -37,14 +37,9 @@ def simulate(p):
         times[f] = ocp.ocp_solver.get_stats('time_tot')
 
         u0 = ocp.ocp_solver.get(0, "u")
-        sim.acados_integrator.set("u", u0)
-        sim.acados_integrator.set("x", simX[f])
-        sim.acados_integrator.solve()
-        x1 = sim.acados_integrator.get("x")
 
-        # Check if the solution is infeasible: 1) solver status, 2) u0 outside U, 3) x1 outside X
-        if status != 0 or np.all((u0 <= ocp.Cmin_limits) | (u0 >= ocp.Cmax_limits)) or \
-                np.all((x1 <= ocp.Xmin_limits) | (x1 >= ocp.Xmax_limits)):
+        # Check if the solution is infeasible: 1) solver status, 2) u0 outside U
+        if status != 0 or np.all((u0 <= ocp.Cmin_limits) | (u0 >= ocp.Cmax_limits)):
 
             if failed_iter >= N:
                 break
@@ -55,15 +50,9 @@ def simulate(p):
             x_sol_guess = np.roll(x_sol_guess, -1, axis=0)
             u_sol_guess = np.roll(u_sol_guess, -1, axis=0)
 
-            sim.acados_integrator.set("u", simU[f])
-            sim.acados_integrator.set("x", simX[f])
-            sim.acados_integrator.solve()
-            simX[f+1] = sim.acados_integrator.get("x")
-
         else:
             failed_iter = 0
             simU[f] = u0
-            simX[f+1] = x1
 
             for i in range(N-1):
                 x_sol_guess[i] = ocp.ocp_solver.get(i+1, "x")
@@ -75,6 +64,16 @@ def simulate(p):
         x_sol_guess[-1] = np.copy(x_sol_guess[-2])
         u_sol_guess[-1] = np.copy(u_sol_guess[-2])
 
+        sim.acados_integrator.set("u", simU[f])
+        sim.acados_integrator.set("x", simX[f])
+        sim.acados_integrator.solve()
+        simX[f+1] = sim.acados_integrator.get("x")
+
+        # Check if the next state is outside the constraints
+        # if np.all((simX[f+1] <= ocp.Xmin_limits) | (simX[f+1] >= ocp.Xmax_limits)):
+        if not np.all((simX[f+1] >= ocp.Xmin_limits) & (simX[f+1] <= ocp.Xmax_limits)):
+            break
+
     return f, times, simX, simU, failed_tot
 
 def init_guess(p):
@@ -83,6 +82,7 @@ def init_guess(p):
     x0[:ocp.ocp.dims.nu] = x0_vec[p]
 
     # Create initial guess
+    # x_sol_guess, u_sol_guess = np.zeros((N + 1, ocp.ocp.dims.nx)), np.zeros((N, ocp.ocp.dims.nu))
     x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
        
     status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax-0.05, 0)
@@ -116,18 +116,27 @@ time_step = 5*1e-3
 tot_time = 0.18
 tot_steps = 100
 
-folder = '../viable_init/'
-x0_vec = np.load(folder + 'initial_conditions.npy')
-test_num = len(x0_vec)
+# folder = '../viable_init/'
+# x0_vec = np.load(folder + 'initial_conditions.npy')
+# test_num = len(x0_vec)
+
 
 sim = SYMtriplependulum(time_step, tot_time, True)
 ocp = OCPtriplependulumSTD("SQP", time_step, tot_time, True)
 x_ref = np.array([ocp.thetamax-0.05, np.pi, np.pi, 0, 0, 0])
 
+test_num = 100
+sampler = qmc.Halton(d=ocp.ocp.dims.nu, scramble=False)
+sample = sampler.random(n=test_num)
+l_bounds = ocp.Xmin_limits[:ocp.ocp.dims.nu]
+u_bounds = ocp.Xmax_limits[:ocp.ocp.dims.nu]
+x0_vec = qmc.scale(sample, l_bounds, u_bounds)
+
 N = ocp.ocp.dims.N
 
-with Pool(30) as p:
-    res = p.map(init_guess, range(test_num))
+res = []
+for i in range(test_num):
+    res.append(init_guess(i))
 
 x_sol_guess_vec, u_sol_guess_vec, succ, fails = zip(*res)
 print('Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
@@ -141,8 +150,9 @@ ocp = OCPtriplependulumSTD("SQP_RTI", time_step, tot_time, True)
 N = ocp.ocp.dims.N
 
 # MPC controller without terminal constraints:
-with Pool(cpu_num) as p:
-    res = p.map(simulate, range(test_num))
+res = []
+for i in range(test_num):
+    res.append(simulate(i))
 
 res_steps, stats, x_traj, u_traj, failed = zip(*res)
 
@@ -164,6 +174,7 @@ idx = np.where(res_arr != tot_steps - 1)[0]
 x_init = x_arr[idx, res_arr[idx]]
 print('Completed tasks: ' + str(100 - len(idx)) + ' over 100')
 
+
 # Save pickle file
 data_dir = '../data_3dof_safety_10/'
 with open(data_dir + 'results_no_constraint.pkl', 'wb') as f:
@@ -176,4 +187,7 @@ with open(data_dir + 'results_no_constraint.pkl', 'wb') as f:
     all_data['x_init'] = x_init
     all_data['x_traj'] = x_traj
     all_data['u_traj'] = u_traj
+    all_data['x0_vec'] = x0_vec
+    all_data['x_guess_vec'] = x_sol_guess_vec
+    all_data['u_guess_vec'] = u_sol_guess_vec
     pickle.dump(all_data, f)

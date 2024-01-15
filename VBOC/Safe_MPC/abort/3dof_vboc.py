@@ -146,7 +146,7 @@ for i in range(N_a):
         perc = diff / norm_init * 100
         # print("Difference btw initial velocity norms (at iter ", i, ") ", diff)
         # print("Relative error in percentage: ", perc)
-        if diff < 0.1:
+        if perc < 1:
             counter[i] = 1
 
 print('Number of acceptable solution: ', np.sum(counter), 'over ', np.sum(solved))

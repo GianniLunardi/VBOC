@@ -18,13 +18,16 @@ warnings.filterwarnings("ignore")
 
 def init_guess(k):
 
-    x0 = np.zeros((ocp.ocp.dims.nx,))
+    x0 = np.zeros((ocp.ocp.dims.nx,))          # NB: small non-zero initial velocity to avoid nan in constraint Jacobian
     x0[:ocp.ocp.dims.nu] = data[k]
 
     # Guess:
-    x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
+    x_sol_guess = np.full((N + 1, ocp.ocp.dims.nx), x0) 
+    u_sol_guess = np.zeros((N, ocp.ocp.dims.nu)) 
+    # x_sol_guess, u_sol_guess = create_guess(sim, ocp, x0, x_ref)
 
     status = ocp.OCP_solve(x0, x_sol_guess, u_sol_guess, ocp.thetamax - 0.05, 0)
+    ocp.ocp_solver.print_statistics()
     success = 0
 
     if status == 0 or status == 2:
@@ -59,7 +62,7 @@ mean = torch.load('../mean_3dof_vboc')
 std = torch.load('../std_3dof_vboc')
 
 cpu_num = 30
-test_num = 350
+test_num = 100 # 350
 time_step = 5*1e-3
 tot_time = 0.18 - time_step
 tot_steps = 100
@@ -88,7 +91,7 @@ with Pool(cpu_num) as p:
     res = p.map(init_guess, range(data.shape[0]))
 
 x_sol_guess_vec_10, u_sol_guess_vec_10, succ = zip(*res)
-print('Safet = 10, Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
+print('Safety = 10, Init guess success: ' + str(np.sum(succ)) + ' over ' + str(test_num))
 
 test_wanted = 100
 succ_10 = np.asarray(succ)

@@ -1,8 +1,9 @@
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSim, AcadosSimSolver
 import numpy as np
 from acados_template import AcadosModel
-from casadi import SX, vertcat, cos, sin, fmax, norm_2, if_else, DM
+from casadi import SX, vertcat, cos, sin, fmax, fmin, norm_2, if_else, DM
 import scipy.linalg as lin
+from copy import deepcopy
 
 
 class MODELtriplependulum:
@@ -40,13 +41,13 @@ class MODELtriplependulum:
         xdot = vertcat(theta1_dot, theta2_dot, theta3_dot, dtheta1_dot, dtheta2_dot, dtheta3_dot)
 
         # controls
-        C1 = SX.sym("C1")
-        C2 = SX.sym("C2")
-        C3 = SX.sym("C3")
-        u = vertcat(C1, C2, C3)
+        tau1 = SX.sym("tau1")
+        tau2 = SX.sym("tau2")
+        tau3 = SX.sym("tau3")
+        self.u = vertcat(tau1, tau2, tau3)
 
         # parameters
-        self.p = SX.sym("safe")
+        self.p = SX.sym("p", 1)
 
         # dynamics
         f_expl = vertcat(
@@ -55,66 +56,66 @@ class MODELtriplependulum:
             dtheta3,
             (-self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
                 -2 * theta3 + 2 * theta2 + theta1) - self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
-                2 * theta3 - 2 * theta2 + theta1) + 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                2 * theta3 - 2 * theta2 + theta1) + 2 * tau1 * self.l2 * self.l3 * self.m3 * cos(
                 -2 * theta3 + 2 * theta2) + 2 * dtheta1 ** 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m2 * (
-                         self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * tau3 * self.l1 * self.l2 * (
                          self.m2 + self.m3) * cos(
-                -2 * theta2 + theta1 + theta3) - 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta2 + theta1 + theta3) - 2 * tau2 * self.l1 * self.l3 * self.m3 * cos(
                 -2 * theta3 + theta2 + theta1) + 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
-                -2 * theta2 + theta1 + theta3) + 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) *
-             cos(theta1 - theta3) + 2 * (C2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (
+                -2 * theta2 + theta1 + theta3) + 2 * tau3 * self.l1 * self.l2 * (self.m2 + self.m3) *
+             cos(theta1 - theta3) + 2 * (tau2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (
                                 self.g * self.l1 * self.m2 * (self.m2 + self.m3) * sin(
                             -2 * theta2 + theta1) + 2 * dtheta2 ** 2 * self.l1 * self.l2 * self.m2 * (
                                             self.m2 + self.m3) * sin(-theta2 + theta1) + self.m3 * dtheta3 ** 2 * sin(
                             theta1 - theta3) * self.l1 * self.l3 * self.m2 + self.g * self.l1 * (
                                             self.m2 ** 2 + (self.m3 + 2 * self.m1) * self.m2 + self.m1 * self.m3) * sin(
-                            theta1) - C1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (
+                            theta1) - tau1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (
                         self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
                     -2 * theta3 + 2 * theta2) - self.m2 ** 2 + (
                                     -self.m3 - 2 * self.m1) * self.m2 - self.m1 * self.m3) / self.l2 / 2,
-            (-2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(
+            (-2 * tau3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(
                 2 * theta1 - theta3 - theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
                 2 * theta1 - theta3 - theta2) + self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
                 theta2 + 2 * theta1 - 2 * theta3) - self.g * self.l1 * self.l3 * (
                          (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
                 -theta2 + 2 * theta1) - 2 * dtheta2 ** 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m2 * (
                          self.m2 + self.m3) * sin(
-                -2 * theta2 + 2 * theta1) + 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta2 + 2 * theta1) + 2 * tau2 * self.l1 * self.l3 * self.m3 * cos(
                 -2 * theta3 + 2 * theta1) + 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m1 * self.m3 * dtheta2 ** 2 * sin(
-                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                -2 * theta3 + 2 * theta2) - 2 * tau1 * self.l2 * self.l3 * self.m3 * cos(
                 -2 * theta3 + theta2 + theta1) + 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m1 * self.m3 * dtheta1 ** 2 * sin(
                 -2 * theta3 +
                 theta2 + theta1) - 2 * self.l1 ** 2 * self.l3 * dtheta1 ** 2 * (
                          (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
-                -theta2 + theta1) + 2 * C3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(
-                -theta3 + theta2) + (2 * C1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (
+                -theta2 + theta1) + 2 * tau3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(
+                -theta3 + theta2) + (2 * tau1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (
                         4 * dtheta3 ** 2 * self.m3 * self.l3 * (self.m1 + self.m2 / 2) * self.l2 * sin(
                     -theta3 + theta2) + self.g * self.m3 * self.l2 * self.m1 * sin(-2 * theta3 + theta2) + self.g * (
                                     (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (
-                                        self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * C2 * (
+                                        self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * tau2 * (
                                     self.m3 + 2 * self.m1 + 2 * self.m2))) * self.l3) / (
                         self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
                     -2 * theta3 + 2 * theta2) + (
                                     -self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 / self.l2 ** 2 / 2,
-            (-2 * self.m3 * C2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(
+            (-2 * self.m3 * tau2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(
                 2 * theta1 - theta3 - theta2) + self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
-                         self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * tau3 * self.l1 * self.l2 * (
                          self.m2 + self.m3) ** 2 * cos(
                 -2 * theta2 + 2 * theta1) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
                          self.m2 + self.m3) * sin(
                 2 * theta1 - theta3) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
                          self.m2 + self.m3) * sin(
                 -theta3 + 2 * theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m1 * self.m3 ** 2 * dtheta3 ** 2 * sin(
-                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(
+                -2 * theta3 + 2 * theta2) - 2 * tau1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(
                 -2 * theta2 + theta1 + theta3) + 2 * self.m3 * dtheta1 ** 2 * self.l1 ** 2 *
              self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(
-                        -2 * theta2 + theta1 + theta3) + 2 * self.m3 * C2 * self.l1 * self.l3 * (
+                        -2 * theta2 + theta1 + theta3) + 2 * self.m3 * tau2 * self.l1 * self.l3 * (
                          self.m3 + 2 * self.m1 + self.m2) * cos(-theta3 + theta2) + (self.m2 + self.m3) * (
-                         2 * C1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (
+                         2 * tau1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (
                              -2 * self.m3 * dtheta1 ** 2 * self.l1 * self.l3 * self.m1 * sin(
                          theta1 - theta3) - 4 * self.m3 * dtheta2 ** 2 * sin(
                          -theta3 + theta2) * self.l2 * self.l3 * self.m1 + self.g * self.m3 * sin(
-                         theta3) * self.l3 * self.m1 - 2 * C3 * (
+                         theta3) * self.l3 * self.m1 - 2 * tau3 * (
                                          self.m3 + 2 * self.m1 + self.m2))) * self.l2) / self.m3 / (
                         self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
                     -2 * theta3 + 2 * theta2) + (
@@ -129,7 +130,7 @@ class MODELtriplependulum:
         self.model.f_impl_expr = f_impl
         self.model.x = self.x
         self.model.xdot = xdot
-        self.model.u = u
+        self.model.u = self.u
         self.model.p = self.p
         self.model.name = model_name
 
@@ -219,7 +220,7 @@ class OCPtriplependulum(MODELtriplependulum):
         self.ocp.solver_options.nlp_solver_type = nlp_solver_type
         self.ocp.solver_options.qp_solver_iter_max = 100
         # self.ocp.solver_options.qp_solver = 'FULL_CONDENSING_QPOASES'
-        self.ocp.solver_options.nlp_solver_max_iter = 1000
+        # self.ocp.solver_options.nlp_solver_max_iter = 1000
         self.ocp.solver_options.globalization = "MERIT_BACKTRACKING"
         # self.ocp.solver_options.alpha_reduction = 0.3
         # self.ocp.solver_options.alpha_min = 1e-2
@@ -268,12 +269,14 @@ class OCPtriplependulumSTD(OCPtriplependulum):
 
 
 def nn_decisionfunction_conservative(params, mean, std, safety_margin, x):
-    vel_norm = fmax(norm_2(x[3:]), 1e-3)
+    x_cp = deepcopy(x)
+    x_cp[3] += 1e-8
 
-    mean = vertcat(mean, mean, mean, 0., 0., 0.)
-    std = vertcat(std, std, std, vel_norm, vel_norm, vel_norm)
+    vel_norm = fmax(norm_2(x_cp[3:]), 1e-3)
+    pos_std = (x_cp[:3] - mean) / std
+    vel_dir = x_cp[3:] / vel_norm
 
-    out = (x - mean) / std
+    out = vertcat(pos_std, vel_dir)
     it = 0
 
     for param in params:
@@ -331,10 +334,10 @@ class OCPtriplependulumHardTerm(OCPtriplependulum):
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p[0], self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
-        self.ocp.constraints.uh_e = np.array([1e4])
+        self.ocp.constraints.uh_e = np.array([1e6])
 
         # ocp model
         self.ocp.model = self.model
@@ -351,10 +354,10 @@ class OCPtriplependulumSoftTerm(OCPtriplependulum):
         super().__init__(nlp_solver_type, time_step, tot_time)
 
         # nonlinear constraints
-        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p, self.x)
+        self.model.con_h_expr_e = nn_decisionfunction_conservative(nn_params, mean, std, self.p[0], self.x)
 
         self.ocp.constraints.lh_e = np.array([0.])
-        self.ocp.constraints.uh_e = np.array([1e4])
+        self.ocp.constraints.uh_e = np.array([1e6])
 
         self.ocp.constraints.idxsh_e = np.array([0])
 
@@ -582,10 +585,10 @@ class OCPBackupVbocLike:
         self.x = vertcat(theta1, theta2, theta3, dtheta1, dtheta2, dtheta3)
 
         # controls
-        C1 = SX.sym("C1")
-        C2 = SX.sym("C2")
-        C3 = SX.sym("C3")
-        u = vertcat(C1, C2, C3)
+        tau1 = SX.sym("tau1")
+        tau2 = SX.sym("tau2")
+        tau3 = SX.sym("tau3")
+        u = vertcat(tau1, tau2, tau3)
 
         # parameters
         w1 = SX.sym("w1")
@@ -600,66 +603,66 @@ class OCPBackupVbocLike:
             dtheta3,
             (-self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
                 -2 * theta3 + 2 * theta2 + theta1) - self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
-                2 * theta3 - 2 * theta2 + theta1) + 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                2 * theta3 - 2 * theta2 + theta1) + 2 * tau1 * self.l2 * self.l3 * self.m3 * cos(
                 -2 * theta3 + 2 * theta2) + 2 * dtheta1 ** 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m2 * (
-                         self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) * sin(-2 * theta2 + 2 * theta1) - 2 * tau3 * self.l1 * self.l2 * (
                          self.m2 + self.m3) * cos(
-                -2 * theta2 + theta1 + theta3) - 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta2 + theta1 + theta3) - 2 * tau2 * self.l1 * self.l3 * self.m3 * cos(
                 -2 * theta3 + theta2 + theta1) + 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
-                -2 * theta2 + theta1 + theta3) + 2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) *
-             cos(theta1 - theta3) + 2 * (C2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (
+                -2 * theta2 + theta1 + theta3) + 2 * tau3 * self.l1 * self.l2 * (self.m2 + self.m3) *
+             cos(theta1 - theta3) + 2 * (tau2 * self.l1 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + (
                                 self.g * self.l1 * self.m2 * (self.m2 + self.m3) * sin(
                             -2 * theta2 + theta1) + 2 * dtheta2 ** 2 * self.l1 * self.l2 * self.m2 * (
                                             self.m2 + self.m3) * sin(-theta2 + theta1) + self.m3 * dtheta3 ** 2 * sin(
                             theta1 - theta3) * self.l1 * self.l3 * self.m2 + self.g * self.l1 * (
                                             self.m2 ** 2 + (self.m3 + 2 * self.m1) * self.m2 + self.m1 * self.m3) * sin(
-                            theta1) - C1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (
+                            theta1) - tau1 * (self.m3 + 2 * self.m2)) * self.l2) * self.l3) / self.l1 ** 2 / self.l3 / (
                         self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
                     -2 * theta3 + 2 * theta2) - self.m2 ** 2 + (
                                     -self.m3 - 2 * self.m1) * self.m2 - self.m1 * self.m3) / self.l2 / 2,
-            (-2 * C3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(
+            (-2 * tau3 * self.l1 * self.l2 * (self.m2 + self.m3) * cos(
                 2 * theta1 - theta3 - theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m2 * self.m3 * dtheta3 ** 2 * sin(
                 2 * theta1 - theta3 - theta2) + self.g * self.l1 * self.l2 * self.l3 * self.m1 * self.m3 * sin(
                 theta2 + 2 * theta1 - 2 * theta3) - self.g * self.l1 * self.l3 * (
                          (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
                 -theta2 + 2 * theta1) - 2 * dtheta2 ** 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m2 * (
                          self.m2 + self.m3) * sin(
-                -2 * theta2 + 2 * theta1) + 2 * C2 * self.l1 * self.l3 * self.m3 * cos(
+                -2 * theta2 + 2 * theta1) + 2 * tau2 * self.l1 * self.l3 * self.m3 * cos(
                 -2 * theta3 + 2 * theta1) + 2 * self.l1 * self.l2 ** 2 * self.l3 * self.m1 * self.m3 * dtheta2 ** 2 * sin(
-                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * cos(
+                -2 * theta3 + 2 * theta2) - 2 * tau1 * self.l2 * self.l3 * self.m3 * cos(
                 -2 * theta3 + theta2 + theta1) + 2 * self.l1 ** 2 * self.l2 * self.l3 * self.m1 * self.m3 * dtheta1 ** 2 * sin(
                 -2 * theta3 +
                 theta2 + theta1) - 2 * self.l1 ** 2 * self.l3 * dtheta1 ** 2 * (
                          (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (self.m1 + self.m2)) * self.l2 * sin(
-                -theta2 + theta1) + 2 * C3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(
-                -theta3 + theta2) + (2 * C1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (
+                -theta2 + theta1) + 2 * tau3 * self.l1 * self.l2 * (self.m3 + 2 * self.m1 + self.m2) * cos(
+                -theta3 + theta2) + (2 * tau1 * self.l2 * (self.m3 + 2 * self.m2) * cos(-theta2 + theta1) + self.l1 * (
                         4 * dtheta3 ** 2 * self.m3 * self.l3 * (self.m1 + self.m2 / 2) * self.l2 * sin(
                     -theta3 + theta2) + self.g * self.m3 * self.l2 * self.m1 * sin(-2 * theta3 + theta2) + self.g * (
                                     (self.m1 + 2 * self.m2) * self.m3 + 2 * self.m2 * (
-                                        self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * C2 * (
+                                        self.m1 + self.m2)) * self.l2 * sin(theta2) - 2 * tau2 * (
                                     self.m3 + 2 * self.m1 + 2 * self.m2))) * self.l3) / (
                         self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
                     -2 * theta3 + 2 * theta2) + (
                                     -self.m1 - self.m2) * self.m3 - 2 * self.m1 * self.m2 - self.m2 ** 2) / self.l1 / self.l3 / self.l2 ** 2 / 2,
-            (-2 * self.m3 * C2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(
+            (-2 * self.m3 * tau2 * self.l1 * self.l3 * (self.m2 + self.m3) * cos(
                 2 * theta1 - theta3 - theta2) + self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
-                         self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * C3 * self.l1 * self.l2 * (
+                         self.m2 + self.m3) * sin(2 * theta1 + theta3 - 2 * theta2) + 2 * tau3 * self.l1 * self.l2 * (
                          self.m2 + self.m3) ** 2 * cos(
                 -2 * theta2 + 2 * theta1) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
                          self.m2 + self.m3) * sin(
                 2 * theta1 - theta3) - self.g * self.m3 * self.l1 * self.l2 * self.l3 * self.m1 * (
                          self.m2 + self.m3) * sin(
                 -theta3 + 2 * theta2) - 2 * self.l1 * self.l2 * self.l3 ** 2 * self.m1 * self.m3 ** 2 * dtheta3 ** 2 * sin(
-                -2 * theta3 + 2 * theta2) - 2 * C1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(
+                -2 * theta3 + 2 * theta2) - 2 * tau1 * self.l2 * self.l3 * self.m3 * (self.m2 + self.m3) * cos(
                 -2 * theta2 + theta1 + theta3) + 2 * self.m3 * dtheta1 ** 2 * self.l1 ** 2 *
              self.l2 * self.l3 * self.m1 * (self.m2 + self.m3) * sin(
-                        -2 * theta2 + theta1 + theta3) + 2 * self.m3 * C2 * self.l1 * self.l3 * (
+                        -2 * theta2 + theta1 + theta3) + 2 * self.m3 * tau2 * self.l1 * self.l3 * (
                          self.m3 + 2 * self.m1 + self.m2) * cos(-theta3 + theta2) + (self.m2 + self.m3) * (
-                         2 * C1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (
+                         2 * tau1 * self.l3 * self.m3 * cos(theta1 - theta3) + self.l1 * (
                              -2 * self.m3 * dtheta1 ** 2 * self.l1 * self.l3 * self.m1 * sin(
                          theta1 - theta3) - 4 * self.m3 * dtheta2 ** 2 * sin(
                          -theta3 + theta2) * self.l2 * self.l3 * self.m1 + self.g * self.m3 * sin(
-                         theta3) * self.l3 * self.m1 - 2 * C3 * (
+                         theta3) * self.l3 * self.m1 - 2 * tau3 * (
                                          self.m3 + 2 * self.m1 + self.m2))) * self.l2) / self.m3 / (
                         self.m2 * (self.m2 + self.m3) * cos(-2 * theta2 + 2 * theta1) + self.m1 * self.m3 * cos(
                     -2 * theta3 + 2 * theta2) + (

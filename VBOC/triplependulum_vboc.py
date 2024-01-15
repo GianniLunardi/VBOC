@@ -384,8 +384,9 @@ q_max = ocp.thetamax
 q_min = ocp.thetamin
 tau_max = ocp.Cmax
 
-stop_time = 21600 # total computational time
-dt_sym = 1e-2 # time step duration
+hours = 12
+stop_time = hours * 3600       # total computational time
+dt_sym = 1e-2  # time step duration
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # pytorch device
 
@@ -396,7 +397,7 @@ iteration = 0
 print('Start data generation, iteration:', iteration)
 
 # Data generation:
-cpu_num = 30
+cpu_num = 24
 num_prob = 1000
 with Pool(cpu_num) as p:
     traj = p.map(data_generation, range(num_prob))
@@ -413,7 +414,7 @@ output_layers = 1
 learning_rate = 1e-3
 
 # Model and optimizer:
-model_dir = NeuralNetDIR(input_layers, hidden_layers, output_layers).to(device)
+model_dir = NeuralNetDIR(input_layers, hidden_layers, output_layers, activation=nn.ELU()).to(device)
 criterion_dir = nn.MSELoss()
 optimizer_dir = torch.optim.Adam(model_dir.parameters(), lr=learning_rate)
 

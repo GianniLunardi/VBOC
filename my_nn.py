@@ -18,15 +18,15 @@ class NeuralNetCLS(nn.Module):
         return out
     
 class NeuralNetDIR(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(NeuralNetDIR, self).__init__()
+    def __init__(self, input_size, hidden_size, output_size, activation=nn.ReLU()):
+        super().__init__()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
+            activation,
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
+            activation,
             nn.Linear(hidden_size, output_size),
-            nn.ReLU(),
+            activation,
         )
 
     def forward(self, x):

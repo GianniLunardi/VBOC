@@ -408,9 +408,12 @@ start_time = time.time()
 # Select system:
 system_sel = 3 # 2 for double pendulum, 3 for triple pendulum
 
+DATA_GEN = False
+MODEL_TRAIN = True
+
 # Prune the model:
 prune_model = False
-prune_amount = 0.5 # percentage of connections to delete
+prune_amount = 0.5  # percentage of connections to delete
 
 # Ocp initialization:
 if system_sel == 3:
@@ -438,29 +441,30 @@ N_start = 100 # initial number of timesteps
 tol = ocp.ocp.solver_options.nlp_solver_tol_stat # OCP cost tolerance
 eps = tol*10 # unviable data generation parameter
 
-print('Start data generation')
+if DATA_GEN:
+    print('Start data generation')
 
-# Data generation:
-cpu_num = 30
-num_prob = 10000
-with Pool(cpu_num) as p:
-    traj = p.map(data_generation, range(num_prob))
+    # Data generation:
+    cpu_num = 20
+    num_prob = 10000
+    with Pool(cpu_num) as p:
+        traj = p.map(data_generation, range(num_prob))
 
-# traj, statpos, statneg = zip(*temp)
-X_temp = [i for i in traj if i is not None]
-print('Data generation completed')
+    # traj, statpos, statneg = zip(*temp)
+    X_temp = [i for i in traj if i is not None]
+    print('Data generation completed')
 
-# Print data generations statistics:
-solved=len(X_temp)
-print('Solved/tot', len(X_temp)/num_prob)
-X_save = np.array([i for f in X_temp for i in f])
-print('Saved/tot', len(X_save)/(solved*100))
+    # Print data generations statistics:
+    solved=len(X_temp)
+    print('Solved/tot', len(X_temp)/num_prob)
+    X_save = np.array([i for f in X_temp for i in f])
+    print('Saved/tot', len(X_save)/(solved*100))
 
-# Save training data:
-np.save('data_' + str(system_sel) + 'dof_vboc', np.asarray(X_save))
-
-# # Load training data:
-# X_save = np.load('data_' + str(system_sel) + 'dof_vboc' + '.npy')
+    # Save training data:
+    np.save('data_' + str(system_sel) + 'dof_vboc', np.asarray(X_save))
+else:
+    print('Load data')
+    X_save = np.load('data_' + str(system_sel) + 'dof_vboc' + '.npy')
 
 # Pytorch params:
 input_layers = ocp.ocp.dims.nx - 1
@@ -469,7 +473,7 @@ output_layers = 1
 learning_rate = 1e-3
 
 # Model and optimizer:
-model_dir = NeuralNetDIR(input_layers, hidden_layers, output_layers).to(device)
+model_dir = NeuralNetDIR(input_layers, hidden_layers, output_layers, activation=nn.ELU()).to(device)
 criterion_dir = nn.MSELoss()
 optimizer_dir = torch.optim.Adam(model_dir.parameters(), lr=learning_rate)
 
@@ -499,69 +503,70 @@ it_max = B * 10
 
 training_evol = []
 
-print('Start model training')
+if MODEL_TRAIN:
+    print('Start model training')
 
-it = 1
-val = max(X_train_dir[:,ocp.ocp.dims.nx - 1])
+    it = 1
+    val = max(X_train_dir[:,ocp.ocp.dims.nx - 1])
 
-# Train the model
-while val > 1e-3 and it < it_max:
-    ind = random.sample(range(len(X_train_dir)), n_minibatch)
+    # Train the model
+    while val > 1e-3 and it < it_max:
+        ind = random.sample(range(len(X_train_dir)), n_minibatch)
 
-    X_iter_tensor = torch.Tensor([X_train_dir[i][:ocp.ocp.dims.nx - 1] for i in ind]).to(device)
-    y_iter_tensor = torch.Tensor([[X_train_dir[i][ocp.ocp.dims.nx - 1]] for i in ind]).to(device)
+        X_iter_tensor = torch.Tensor([X_train_dir[i][:ocp.ocp.dims.nx - 1] for i in ind]).to(device)
+        y_iter_tensor = torch.Tensor([[X_train_dir[i][ocp.ocp.dims.nx - 1]] for i in ind]).to(device)
 
-    # Forward pass
-    outputs = model_dir(X_iter_tensor)
-    loss = criterion_dir(outputs, y_iter_tensor)
+        # Forward pass
+        outputs = model_dir(X_iter_tensor)
+        loss = criterion_dir(outputs, y_iter_tensor)
 
-    # Backward and optimize
-    loss.backward()
-    optimizer_dir.step()
-    optimizer_dir.zero_grad()
+        # Backward and optimize
+        loss.backward()
+        optimizer_dir.step()
+        optimizer_dir.zero_grad()
 
-    val = beta * val + (1 - beta) * loss.item()
-    it += 1
+        val = beta * val + (1 - beta) * loss.item()
+        it += 1
 
-    if it % B == 0: 
-        print(val)
-        training_evol.append(val)
+        if it % B == 0:
+            print(val)
+            training_evol.append(val)
 
-print('Model training completed')
+    print('Model training completed')
 
-# Show the resulting RMSE on the training data:
-outputs = np.empty((len(X_train_dir),1))
-n_minibatch_model = pow(2,15)
-with torch.no_grad():
-    X_iter_tensor = torch.Tensor(X_train_dir[:,:ocp.ocp.dims.nx - 1]).to(device)
-    y_iter_tensor = torch.Tensor(X_train_dir[:,ocp.ocp.dims.nx - 1:]).to(device)
-    my_dataloader = DataLoader(X_iter_tensor,batch_size=n_minibatch_model,shuffle=False)
-    for (idx, batch) in enumerate(my_dataloader):
-        if n_minibatch_model*(idx+1) > len(X_train_dir):
-            outputs[n_minibatch_model*idx:len(X_train_dir)] = model_dir(batch).cpu().numpy()
-        else:
-            outputs[n_minibatch_model*idx:n_minibatch_model*(idx+1)] = model_dir(batch).cpu().numpy()
-    outputs_tensor = torch.Tensor(outputs).to(device)
-    print('RMSE train data: ', torch.sqrt(criterion_dir(outputs_tensor, y_iter_tensor))) 
+    # Show the resulting RMSE on the training data:
+    outputs = np.empty((len(X_train_dir),1))
+    n_minibatch_model = pow(2,15)
+    with torch.no_grad():
+        X_iter_tensor = torch.Tensor(X_train_dir[:,:ocp.ocp.dims.nx - 1]).to(device)
+        y_iter_tensor = torch.Tensor(X_train_dir[:,ocp.ocp.dims.nx - 1:]).to(device)
+        my_dataloader = DataLoader(X_iter_tensor,batch_size=n_minibatch_model,shuffle=False)
+        for (idx, batch) in enumerate(my_dataloader):
+            if n_minibatch_model*(idx+1) > len(X_train_dir):
+                outputs[n_minibatch_model*idx:len(X_train_dir)] = model_dir(batch).cpu().numpy()
+            else:
+                outputs[n_minibatch_model*idx:n_minibatch_model*(idx+1)] = model_dir(batch).cpu().numpy()
+        outputs_tensor = torch.Tensor(outputs).to(device)
+        print('RMSE train data: ', torch.sqrt(criterion_dir(outputs_tensor, y_iter_tensor)))
 
-# Compute resulting RMSE wrt testing data:
+    # Compute resulting RMSE wrt testing data:
 
-X_test_dir = np.empty((X_test.shape[0],ocp.ocp.dims.nx))
-for i in range(X_test_dir.shape[0]):
-    vel_norm = norm(X_test[i][system_sel:ocp.ocp.dims.nx - 1])
-    X_test_dir[i][ocp.ocp.dims.nx - 1] = vel_norm
-    for l in range(system_sel):
-        X_test_dir[i][l] = (X_test[i][l] - mean_dir) / std_dir
-        X_test_dir[i][l+system_sel] = X_test[i][l+system_sel] / vel_norm
+    X_test_dir = np.empty((X_test.shape[0],ocp.ocp.dims.nx))
+    for i in range(X_test_dir.shape[0]):
+        vel_norm = norm(X_test[i][system_sel:ocp.ocp.dims.nx - 1])
+        X_test_dir[i][ocp.ocp.dims.nx - 1] = vel_norm
+        for l in range(system_sel):
+            X_test_dir[i][l] = (X_test[i][l] - mean_dir) / std_dir
+            X_test_dir[i][l+system_sel] = X_test[i][l+system_sel] / vel_norm
 
-with torch.no_grad():
-    X_iter_tensor = torch.Tensor(X_test_dir[:,:ocp.ocp.dims.nx - 1]).to(device)
-    y_iter_tensor = torch.Tensor(X_test_dir[:,ocp.ocp.dims.nx - 1:]).to(device)
-    outputs = model_dir(X_iter_tensor)
-    print('RMSE test data: ', torch.sqrt(criterion_dir(outputs, y_iter_tensor)))
+    with torch.no_grad():
+        X_iter_tensor = torch.Tensor(X_test_dir[:,:ocp.ocp.dims.nx - 1]).to(device)
+        y_iter_tensor = torch.Tensor(X_test_dir[:,ocp.ocp.dims.nx - 1:]).to(device)
+        outputs = model_dir(X_iter_tensor)
+        print('RMSE test data: ', torch.sqrt(criterion_dir(outputs, y_iter_tensor)))
 
-# Save the model:
-torch.save(model_dir.state_dict(), 'model_' + str(system_sel) + 'dof_vboc')
+    # Save the model:
+    torch.save(model_dir.state_dict(), 'model_' + str(system_sel) + 'dof_vboc')
 
 if prune_model:
 

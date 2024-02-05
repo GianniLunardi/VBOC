@@ -21,21 +21,29 @@ from plots_3dof import plots_3dof
 import torch.nn.utils.prune as prune
 
 
+def setHorizon(N):
+    ocp.N = N
+    ocp.ocp_solver.set_new_time_steps(np.full((N,), 1.))
+    ocp.ocp_solver.update_qp_solver_cond_N(N)
+
+def checkPositionBounds(q):
+    return np.logical_or(np.any(q < q_min + eps), np.any(q > q_max - eps))
+
+def checkVelocityBounds(v):
+    return np.logical_or(np.any(v < v_min + eps), np.any(v > v_max - eps))
+
+def checkStateBounds(x):
+    return np.logical_or(np.any(x < x_min + eps), np.any(x > x_max - eps))
+
 def data_generation(v):
+    count = 0
     valid_data = np.ndarray((0, ocp.ocp.dims.nx - 1))
     # verify the dimension of each trajectory
     valid_traj = []
 
     # Reset the time parameters:
     N = N_start
-    ocp.N = N
-    ocp.ocp_solver.set_new_time_steps(np.full((N,), 1.))
-    ocp.ocp_solver.update_qp_solver_cond_N(N)
-
-    # Initialization of the OCP: The OCP is set to find an extreme trajectory. The initial joint positions
-    # are set to random values, except for the reference joint whose position is set to an extreme value.
-    # The initial joint velocities are left free. The final velocities are all set to 0. The OCP has to maximise 
-    # the initial velocity norm in a predefined direction.
+    setHorizon(N)
 
     # Selection of the reference joint:
     joint_sel = random.choice(range(system_sel))
@@ -44,55 +52,29 @@ def data_generation(v):
     vel_sel = random.choice([-1, 1])  # -1 to maximise initial vel, + 1 to minimize it
 
     # Initial velocity optimization direction:
-    p = np.zeros((system_sel + 1))
+    p = np.random.uniform(-1, 1, system_sel + 1)
+    p[-1] = 0
+    p[joint_sel] = np.random.random() * vel_sel
+    p /= norm(p)
 
-    for l in range(system_sel):
-        if l == joint_sel:
-            p[l] = random.random() * vel_sel
-        else:
-            p[l] = random.random() * random.choice([-1, 1])
-
-    norm_weights = norm(p)
-    p = p / norm_weights
+    q_init_sel = q_min + eps if vel_sel == -1 else q_max - eps
+    q_fin_sel = q_max - eps if vel_sel == -1 else q_min + eps
 
     # Bounds on the initial state:
-    q_init_lb = np.full((ocp.ocp.dims.nx), v_min)
-    q_init_ub = np.full((ocp.ocp.dims.nx), v_max)
-    q_init_lb[-1] = dt_sym
-    q_init_ub[-1] = dt_sym
-
-    for l in range(system_sel):
-
-        if l == joint_sel:
-
-            if vel_sel == -1:
-                q_init_sel = q_min + eps
-                q_fin_sel = q_max - eps
-            else:
-                q_init_sel = q_max - eps
-                q_fin_sel = q_min + eps
-
-            q_init_lb[l] = q_init_sel
-            q_init_ub[l] = q_init_sel
-
-        else:
-            q_init_oth = q_min + random.random() * (q_max - q_min)
-
-            if q_init_oth > q_max - eps:
-                q_init_oth = q_init_oth - eps
-            if q_init_oth < q_min + eps:
-                q_init_oth = q_init_oth + eps
-
-            q_init_lb[l] = q_init_oth
-            q_init_ub[l] = q_init_oth
+    q_init_lb = np.random.uniform(q_min + eps, q_max - eps, ocp.ocp.dims.nx)
+    # POS
+    q_init_lb[joint_sel] = q_init_sel
+    q_init_ub = np.copy(q_init_lb)
+    # VEL 
+    q_init_lb[system_sel:-1], q_init_ub[system_sel:-1] = v_min, v_max
+    # dt
+    q_init_lb[-1], q_init_ub[-1] = dt_sym, dt_sym
 
     # State and input bounds:
     q_lb = np.copy(q_init_lb)
     q_ub = np.copy(q_init_ub)
 
-    for l in range(system_sel):
-        q_lb[l] = q_min
-        q_ub[l] = q_max
+    q_lb[:system_sel], q_ub[:system_sel] = q_min, q_max
 
     u_lb = np.full((system_sel), -tau_max)
     u_ub = np.full((system_sel), tau_max)
@@ -101,35 +83,20 @@ def data_generation(v):
     q_fin_lb = np.copy(q_lb)
     q_fin_ub = np.copy(q_ub)
 
-    for l in range(system_sel):
-        q_fin_lb[l + system_sel] = 0.
-        q_fin_ub[l + system_sel] = 0.
+    q_fin_lb[system_sel:-1], q_fin_ub[system_sel:-1] = 0., 0.
 
-    # Guess:
-    x_sol_guess = np.empty((N, ocp.ocp.dims.nx))
-    u_sol_guess = np.empty((N, ocp.ocp.dims.nu))
+    x_sol_guess = np.zeros((N, ocp.ocp.dims.nx))
+    u_sol_guess = np.zeros((N, ocp.ocp.dims.nu))
+    x_sol_guess[:, :system_sel] = np.full((N, system_sel), q_init_lb[:system_sel])
+    x_sol_guess[:, joint_sel] = np.linspace(q_init_sel, q_fin_sel, N)
+    x_sol_guess[:, -1] = dt_sym
 
-    for i, tau in enumerate(np.linspace(0, 1, N)):
-
-        x_guess = np.copy(q_init_ub)
-
-        for l in range(system_sel):
-            if l == joint_sel:
-                x_guess[l] = (1 - tau) * q_init_sel + tau * q_fin_sel
-                x_guess[l + system_sel] = 2 * (1 - tau) * (q_fin_sel - q_init_sel)
-            else:
-                x_guess[l] = q_init_oth
-                x_guess[l + system_sel] = 0
-
-        x_sol_guess[i] = x_guess
-        u_sol_guess[i] = np.zeros((system_sel))
-
-    cost_old = 1e6
+    cost_old = np.inf
     all_ok = False
 
     # Iteratively solve the OCP with an increased number of time steps until the solution does not change.
     # If the solver fails, try with a slightly different initial condition:
-    for _ in range(10):
+    while True:
 
         # Solve the OCP:
         status = ocp.OCP_solve(x_sol_guess, u_sol_guess, p, q_lb, q_ub, u_lb, u_ub, q_init_lb, q_init_ub, q_fin_lb,
@@ -154,14 +121,10 @@ def data_generation(v):
                 u_sol_guess[i] = ocp.ocp_solver.get(i, "u")
             x_sol_guess[N] = ocp.ocp_solver.get(N, "x")
             u_sol_guess[N] = np.zeros((ocp.ocp.dims.nu))
-            print('Time step: %.4f' % (x_sol_guess[0, -1]))
 
             # Increase the number of time steps:
-            N = N + 1
-            ocp.N = N
-            ocp.ocp_solver.set_new_time_steps(np.full((N,), 1.))
-            ocp.ocp_solver.update_qp_solver_cond_N(N)
-
+            N += 1
+            setHorizon(N)
         else:
             break
 
@@ -181,15 +144,14 @@ def data_generation(v):
         x_sym = np.full((N + 1, ocp.ocp.dims.nx - 1), None)
 
         x_out = np.copy(x_sol[0][:ocp.ocp.dims.nx - 1])
-        for l in range(system_sel):
-            x_out[l + system_sel] = x_out[l + system_sel] - eps * p[l]
+        x_out[system_sel:] -= eps * p[:system_sel]
 
         # save the initial state:
         valid_data = np.append(valid_data, [x_sol[0][:ocp.ocp.dims.nx - 1]], axis=0)
         valid_traj.append(x_sol)
 
         # Check if initial velocities lie on a limit:
-        if any(i > v_max or i < v_min for i in x_out[system_sel:ocp.ocp.dims.nx - 1]):
+        if checkVelocityBounds(x_out[system_sel:]):
             is_x_at_limit = True  # the state is on dX
         else:
             is_x_at_limit = False  # the state is on dV
@@ -203,15 +165,14 @@ def data_generation(v):
                 # If the previous state was on a limit, the current state location cannot be identified using
                 # the corresponding unviable state but it has to rely on the proximity to the state limits 
                 # (more restrictive):
-                if any(i > q_max - eps or i < q_min + eps for i in x_sol[f][:system_sel]) or any(
-                        i > v_max - tol or i < v_min + tol for i in x_sol[f][system_sel:ocp.ocp.dims.nx - 1]):
+                if checkStateBounds(x_sol[f,:-1]):
                     is_x_at_limit = True  # the state is on dX
-
                 else:
                     is_x_at_limit = False  # the state is either on the interior of V or on dV
 
                     # if the traj de-touches from a position limit it usually enters V:
-                    if any(i > q_max - eps or i < q_min + eps for i in x_sol[f - 1][:system_sel]):
+                    # if any(i > q_max - eps or i < q_min + eps for i in x_sol[f - 1][:system_sel]):
+                    if checkPositionBounds(x_sol[f - 1][:system_sel]):
                         break
 
                     # Solve an OCP to verify whether the following part of the trajectory is on V or dV. To do so
@@ -220,17 +181,12 @@ def data_generation(v):
                     # direction of the current joint velocities.
 
                     N_test = N - f
-                    ocp.N = N_test
-                    ocp.ocp_solver.set_new_time_steps(np.full((N_test,), 1.))
-                    ocp.ocp_solver.update_qp_solver_cond_N(N_test)
+                    setHorizon(N_test)
 
-                    # Cost: 
-                    norm_weights = norm(x_sol[f][system_sel:ocp.ocp.dims.nx - 1])
-                    p = np.zeros((system_sel + 1))
-                    for l in range(system_sel):
-                        p[l] = -x_sol[f][
-                            l + system_sel] / norm_weights
-                        # the cost direction is based on the current velocity direction
+                    # Cost:
+                    p = np.zeros((system_sel + 1)) 
+                    norm_weights = norm(x_sol[f][system_sel:-1])
+                    p[:system_sel] = - x_sol[f][system_sel:-1] / norm_weights
 
                     # Bounds on the initial state:
                     for l in range(system_sel):
@@ -250,7 +206,7 @@ def data_generation(v):
                     norm_bef = 0
                     all_ok = False
 
-                    for _ in range(5):
+                    for _ in range(5):              # TODO: should be a while True, but it takes too long 
 
                         # Solve the OCP:
                         status = ocp.OCP_solve(x_sol_guess, u_sol_guess, p, q_lb, q_ub, u_lb, u_ub, q_init_lb,
@@ -260,7 +216,7 @@ def data_generation(v):
 
                             # Compare the current cost with the previous one:
                             x0_new = ocp.ocp_solver.get(0, "x")
-                            norm_new = norm(x0_new[system_sel:ocp.ocp.dims.nx - 1])
+                            norm_new = norm(x0_new[system_sel:-1])
 
                             if norm_new < norm_bef + tol:
                                 all_ok = True
@@ -278,11 +234,8 @@ def data_generation(v):
                             u_sol_guess[N_test] = np.zeros(ocp.ocp.dims.nu)
 
                             # Increase the number of time steps:
-                            N_test = N_test + 1
-                            ocp.N = N_test
-                            ocp.ocp_solver.set_new_time_steps(np.full((N_test,), 1.))
-                            ocp.ocp_solver.update_qp_solver_cond_N(N_test)
-
+                            N_test += 1
+                            setHorizon(N_test)
                         else:
                             break
 
@@ -297,12 +250,14 @@ def data_generation(v):
                                 u_sol[i + f] = ocp.ocp_solver.get(i, "u")
 
                             x_out = np.copy(x_sol[f][:ocp.ocp.dims.nx - 1])
+                            x_out[system_sel:] += eps * x_out[system_sel:] / norm_new
 
-                            for l in range(system_sel):
-                                x_out[l + system_sel] = x_out[l + system_sel] + eps * x_out[l + system_sel] / norm_new
+                            # TODO: verify the sign of eps p
+                            # for l in range(system_sel):
+                            #     x_out[l + system_sel] = x_out[l + system_sel] + eps * x_out[l + system_sel] / norm_new
 
                             # Check if velocities lie on a limit:
-                            if any(i > v_max or i < v_min for i in x_out[system_sel:ocp.ocp.dims.nx - 1]):
+                            if checkVelocityBounds(x_out[system_sel:]):
                                 is_x_at_limit = True  # the state is on dX
                             else:
                                 is_x_at_limit = False  # the state is on dV
@@ -313,16 +268,14 @@ def data_generation(v):
 
                             # Generate the new corresponding unviable state in the cost direction:
                             x_out = np.copy(x_sol[f][:ocp.ocp.dims.nx - 1])
-
-                            for l in range(system_sel):
-                                x_out[l + system_sel] = x_out[l + system_sel] - eps * p[l]
+                            x_out[system_sel:] -= eps * p[:system_sel]
 
                             x_sym[f] = x_out
 
                     else:  # we cannot say whether the state is on dV or inside V
 
                         for r in range(f, N):
-                            if any(abs(i) > v_max - eps for i in x_sol[r][system_sel:ocp.ocp.dims.nx - 1]):
+                            if checkVelocityBounds(x_sol[r, system_sel:]):
                                 # Save the viable states at velocity limits:
                                 valid_data = np.append(valid_data, [x_sol[r][:ocp.ocp.dims.nx - 1]], axis=0)
 
@@ -337,15 +290,13 @@ def data_generation(v):
                 u_sym = np.copy(u_sol[f - 1])
                 sim.acados_integrator.set("u", u_sym)
                 sim.acados_integrator.set("x", x_sym[f - 1])
-                # sim.acados_integrator.set("T", dt_sym)
                 status = sim.acados_integrator.solve()
                 x_out = sim.acados_integrator.get("x")
                 x_sym[f] = x_out
 
                 # When the state of the unviable simulated trajectory violates a limit, the corresponding viable state
                 # of the optimal trajectory is on dX:
-                if any(i > q_max or i < q_min for i in x_out[:system_sel]) or any(
-                        i > v_max or i < v_min for i in x_out[system_sel:ocp.ocp.dims.nx - 1]):
+                if checkStateBounds(x_out):
                     is_x_at_limit = True  # the state is on dX
                 else:
                     is_x_at_limit = False  # the state is on dV
@@ -354,7 +305,7 @@ def data_generation(v):
                     abs(i) > tol for i in x_sol[f][system_sel:ocp.ocp.dims.nx - 1]):
                 # Save the viable and unviable states:
                 valid_data = np.append(valid_data, [x_sol[f][:ocp.ocp.dims.nx - 1]], axis=0)
-
+        # print("Times in which the state bounds hold: ", count)
         return valid_data.tolist(), valid_traj
 
     else:
@@ -366,7 +317,7 @@ start_time = time.time()
 # Select system:
 system_sel = 2  # 2 for double pendulum, 3 for triple pendulum
 
-DATA_GEN = True
+DATA_GEN = False
 MODEL_TRAIN = True
 
 # Prune the model:
@@ -391,6 +342,8 @@ v_min = - ocp.dthetamax
 q_max = ocp.thetamax
 q_min = ocp.thetamin
 tau_max = ocp.Cmax
+x_min = np.hstack([[q_min] * system_sel, [v_min] * system_sel])
+x_max = np.hstack([[q_max] * system_sel, [v_max] * system_sel])
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # pytorch device
 
@@ -403,8 +356,8 @@ if DATA_GEN:
     print('Start data generation')
 
     # Data generation:
-    cpu_num = 20
-    num_prob = 10
+    cpu_num = 24
+    num_prob = 500
     with Pool(cpu_num) as p:
         res = list(tqdm(p.imap(data_generation, range(num_prob)), total=num_prob))
 
@@ -421,8 +374,17 @@ if DATA_GEN:
     print('Saved/tot', len(X_save) / (solved * 100))
 
     # Save training data:
-    # np.save('data_' + str(system_sel) + 'dof_vboc', np.asarray(X_save))
+    np.save('data_' + str(system_sel) + 'dof_vboc', np.asarray(X_save))
     # np.save('traj_' + str(system_sel) + 'dof_vboc', np.asarray(X_traj))
+
+    # Plot the data
+    plt.figure()
+    plt.xlim(q_min, q_max)
+    plt.ylim(v_min, v_max)
+    plt.scatter(X_save[:, 0], X_save[:, 2], s=1, label='q1')
+    plt.scatter(X_save[:, 1], X_save[:, 3], s=1, label='q2')
+    plt.legend()
+    plt.show()
 else:
     print('Load data')
     X_save = np.load('data_' + str(system_sel) + 'dof_vboc' + '.npy')

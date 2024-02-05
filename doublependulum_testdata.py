@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import random 
 from numpy.linalg import norm as norm
 from VBOC.doublependulum_class_vboc import OCPdoublependulumINIT
@@ -34,7 +35,8 @@ def testing(v):
 
     # Guess:
     x_sol_guess = np.full((N, 5), np.array([q_init_1, q_init_2, 0., 0., dt_sym]))
-    u_sol_guess = np.full((N, 2), np.array([ocp.g*ocp.l1*(ocp.m1+ocp.m2)*math.sin(q_init_1),ocp.g*ocp.l2*ocp.m2*math.sin(q_init_2)]))
+    u_sol_guess = np.zeros((N, 2))
+    # u_sol_guess = np.full((N, 2), np.array([ocp.g*ocp.l1*(ocp.m1+ocp.m2)*math.sin(q_init_1),ocp.g*ocp.l2*ocp.m2*math.sin(q_init_2)]))
 
     # Iteratively solve the OCP with an increased number of time steps until the solution converges:
     cost = 1e6
@@ -131,11 +133,21 @@ q_min = ocp.thetamin
 tau_max = ocp.Cmax
 
 # Test data generation:
-cpu_num = 30
-num_prob = 1000
+cpu_num = 24
+num_prob = 500
 
 with Pool(cpu_num) as p:
     data = p.map(testing, range(num_prob))
 
 X_test = np.array(data)
 np.save('data2_test.npy', X_test)
+
+plt.figure()
+plt.xlim(q_min, q_max)
+plt.ylim(v_min, v_max)
+plt.scatter(X_test[:, 0], X_test[:, 2], s=1, label='q1')
+plt.scatter(X_test[:, 1], X_test[:, 3], s=1, label='q2')
+plt.legend()
+plt.show()
+# plt.savefig('data.png')
+plt.close()

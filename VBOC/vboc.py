@@ -206,7 +206,7 @@ def data_generation(v):
                     norm_bef = 0
                     all_ok = False
 
-                    for _ in range(5):              # TODO: should be a while True, but it takes too long 
+                    for _ in range(5):
 
                         # Solve the OCP:
                         status = ocp.OCP_solve(x_sol_guess, u_sol_guess, p, q_lb, q_ub, u_lb, u_ub, q_init_lb,
@@ -252,7 +252,6 @@ def data_generation(v):
                             x_out = np.copy(x_sol[f][:ocp.ocp.dims.nx - 1])
                             x_out[system_sel:] += eps * x_out[system_sel:] / norm_new
 
-                            # TODO: verify the sign of eps p
                             # for l in range(system_sel):
                             #     x_out[l + system_sel] = x_out[l + system_sel] + eps * x_out[l + system_sel] / norm_new
 

@@ -1,42 +1,62 @@
 import re
 import numpy as np
-from casadi import MX
+from casadi import MX, vertcat
+from urdf_parser_py.urdf import URDF
+import adam
+from adam.casadi import KinDynComputations
 from acados_template import AcadosModel, AcadosSim, AcadosSimSolver, AcadosOcp, AcadosOcpSolver
 
 
-class AbstractModel:
+class AdamModel:
     def __init__(self, params):
         self.params = params
         self.amodel = AcadosModel()
-        # Dummy dynamics (double integrator)
-        self.amodel.name = "double_integrator"
-        self.x = MX.sym("x")
-        self.x_dot = MX.sym("x_dot")
-        self.u = MX.sym("u")
-        self.f_expl = self.u
-        self.p = MX.sym("p")
-        self.addDynamicsModel(params)
+        # Robot dynamics with Adam (IIT)
+        robot = URDF.from_xml_file(params.robot_urdf)
+        joint_names = [joint.name for joint in robot.joints]
+        dynamics = KinDynComputations(params.robot_urdf, joint_names, robot.get_root())        
+        dynamics.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
+        self.mass = dynamics.mass_matrix_fun()
+        self.bias = dynamics.bias_force_fun()
+        nq = len(joint_names)
+
+        self.amodel.name = params.urdf_name
+        self.x = MX.sym("x", nq * 2)
+        self.x_dot = MX.sym("x_dot", nq * 2)
+        self.u = MX.sym("u", nq)
+        self.p = MX.sym("p", nq)
+
+        if params.rnea:
+            H_b = np.eye(4)
+            self.f_impl = vertcat(
+                self.x[nq:] - self.x_dot[:nq],
+                self.mass(H_b, self.x[:nq])[6:, 6:] @ self.x_dot[nq:] +
+                self.bias(H_b, self.x[:nq],  np.zeros(6), self.x[nq:])[6:] - self.u
+            )
+        else:    
+            self.f_expl = vertcat(self.x[nq:], self.u)
+            
         self.amodel.x = self.x
         self.amodel.xdot = self.x_dot
         self.amodel.u = self.u
-        self.amodel.f_expl_expr = params.dt * self.f_expl
+        if params.rnea:
+            self.amodel.f_impl_expr = self.f_impl
+        else:
+            self.amodel.f_expl_expr = params.dt * self.f_expl
         self.amodel.p = self.p
 
         self.nx = self.amodel.x.size()[0]
         self.nu = self.amodel.u.size()[0]
         self.ny = self.nx + self.nu
-        self.nq = int(self.nx / 2)
-        self.nv = self.nx - self.nq
+        self.nq = nq
+        self.nv = nq
 
         # Joint limits
-        self.u_min = -params.u_max * np.ones(self.nu)
-        self.u_max = params.u_max * np.ones(self.nu)
+        self.tau_min = params.tau_min * np.ones(self.nu)
+        self.tau_max = params.tau_max * np.ones(self.nu)
         self.x_min = np.hstack([params.q_min * np.ones(self.nq), -params.dq_max * np.ones(self.nq)])
         self.x_max = np.hstack([params.q_max * np.ones(self.nq), params.dq_max * np.ones(self.nq)])
         self.eps = params.state_tol
-
-    def addDynamicsModel(self, params):
-        pass
 
     def insideStateConstraints(self, x):
         return np.all(np.logical_and(x >= self.x_min + self.eps, x <= self.x_max - self.eps))
@@ -65,7 +85,7 @@ class SimDynamics:
         sim.model = model.amodel
         # T --> should be dt, but instead we multiply the dynamics by dt
         # this speed up the increment of the OCP horizon
-        sim.solver_options.T = 1.
+        sim.solver_options.T = self.params.dt if self.params.rnea else 1.
         sim.solver_options.integrator_type = self.params.integrator_type
         sim.solver_options.num_stages = self.params.num_stages
         sim.parameter_values = np.zeros(model.nv)
@@ -102,7 +122,7 @@ class AbstractController:
         self.ocp = AcadosOcp()
 
         # Dimensions
-        self.ocp.solver_options.tf = self.N
+        self.ocp.solver_options.tf = self.N * self.params.dt if self.params.rnea else self.N
         self.ocp.dims.N = self.N
 
         # Model
@@ -116,9 +136,6 @@ class AbstractController:
         self.ocp.constraints.ubx_0 = self.model.x_max
         self.ocp.constraints.idxbx_0 = np.arange(self.model.nx)
 
-        self.ocp.constraints.lbu = self.model.u_min
-        self.ocp.constraints.ubu = self.model.u_max
-        self.ocp.constraints.idxbu = np.arange(self.model.nu)
         self.ocp.constraints.lbx = self.model.x_min
         self.ocp.constraints.ubx = self.model.x_max
         self.ocp.constraints.idxbx = np.arange(self.model.nx)
@@ -126,10 +143,27 @@ class AbstractController:
         self.ocp.constraints.lbx_e = self.model.x_min
         self.ocp.constraints.ubx_e = self.model.x_max
         self.ocp.constraints.idxbx_e = np.arange(self.model.nx)
+
+        if self.params.rnea:
+            self.ocp.constraints.lbu = self.model.tau_min
+            self.ocp.constraints.ubu = self.model.tau_max
+            self.ocp.constraints.idxbu = np.arange(self.model.nu)    
+        else:
+            # Dynamics --> nonlinear constraint (if aba)
+            H_b = np.eye(4)                             # Base roto-translation matrix    
+            computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
+                              self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
+            self.model.amodel.con_h_expr = computed_torque
+
+            self.ocp.constraints.lh = self.model.tau_min
+            self.ocp.constraints.uh = self.model.tau_max
+            
+
         # Additional constraints
         self.addConstraint()
 
         # Solver options
+        self.ocp.solver_options.integrator_type = self.params.integrator_type
         self.ocp.solver_options.hessian_approx = "EXACT"
         self.ocp.solver_options.exact_hess_constr = 0
         self.ocp.solver_options.exact_hess_dyn = 0
@@ -174,5 +208,8 @@ class AbstractController:
 
     def resetHorizon(self, N):
         self.N = N
-        self.ocp_solver.set_new_time_steps(np.full(N, 1.))
+        if self.params.rnea:
+            self.ocp_solver.set_new_time_steps(np.full(N, self.params.dt))
+        else:
+            self.ocp_solver.set_new_time_steps(np.full(N, 1.))
         self.ocp_solver.update_qp_solver_cond_N(N)

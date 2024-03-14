@@ -6,9 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from multiprocessing import Pool
-import vboc.model as models
 from vboc.parser import Parameters, parse_args
-from vboc.abstract import SimDynamics
+from vboc.abstract import AdamModel, SimDynamics
 from vboc.controller import ViabilityController
 from vboc.learning import NeuralNetwork, RegressionNN, plot_viability_kernel
 
@@ -113,15 +112,11 @@ if __name__ == '__main__':
 
     args = parse_args()
     # Define the available systems
-    available_systems = {
-        'pendulum': 'PendulumModel',
-        'double_pendulum': 'DoublePendulumModel',
-        'triple_pendulum': 'TriplePendulumModel'
-    }
+    available_systems = ['double_pendulum']
     if args['system'] not in available_systems:
         raise ValueError('System not available. Available: ' + str(list(available_systems.keys())))
-    params = Parameters('triple_pendulum')          # contains the parameters for all pendulum models
-    model = getattr(models, available_systems[args['system']])(params)
+    params = Parameters(args['system'], rnea=False) 
+    model = AdamModel(params)
     simulator = SimDynamics(model)
     controller = ViabilityController(simulator)
 

@@ -52,10 +52,15 @@ class AdamModel:
         self.nv = nq
 
         # Joint limits
-        self.tau_min = params.tau_min * np.ones(self.nu)
-        self.tau_max = params.tau_max * np.ones(self.nu)
-        self.x_min = np.hstack([params.q_min * np.ones(self.nq), -params.dq_max * np.ones(self.nq)])
-        self.x_max = np.hstack([params.q_max * np.ones(self.nq), params.dq_max * np.ones(self.nq)])
+        joint_lower = np.array([joint.limit.lower for joint in robot.joints])
+        joint_upper = np.array([joint.limit.upper for joint in robot.joints])
+        joint_velocity = np.array([joint.limit.velocity for joint in robot.joints])
+        joint_effort = np.array([joint.limit.effort for joint in robot.joints])
+
+        self.tau_min = - joint_effort
+        self.tau_max = joint_effort
+        self.x_min = np.hstack([joint_lower, - joint_velocity])
+        self.x_max = np.hstack([joint_upper, joint_velocity])
         self.eps = params.state_tol
 
     def insideStateConstraints(self, x):

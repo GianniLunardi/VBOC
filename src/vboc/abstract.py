@@ -35,6 +35,10 @@ class AdamModel:
             )
         else:    
             self.f_expl = vertcat(self.x[nq:], self.u)
+            self.f_disc = vertcat(
+                self.x[:nq] + params.dt * self.x[nq:] + 0.5 * params.dt**2 * self.u,
+                self.x[nq:] + params.dt * self.u
+            ) 
             
         self.amodel.x = self.x
         self.amodel.xdot = self.x_dot
@@ -158,8 +162,11 @@ class AbstractController:
             H_b = np.eye(4)                             # Base roto-translation matrix    
             computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
                               self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
+            self.model.amodel.con_h_expr_0 = computed_torque
             self.model.amodel.con_h_expr = computed_torque
 
+            self.ocp.constraints.lh_0 = self.model.tau_min
+            self.ocp.constraints.uh_0 = self.model.tau_max
             self.ocp.constraints.lh = self.model.tau_min
             self.ocp.constraints.uh = self.model.tau_max
             

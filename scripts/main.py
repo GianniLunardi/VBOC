@@ -112,9 +112,9 @@ if __name__ == '__main__':
 
     args = parse_args()
     # Define the available systems
-    available_systems = ['double_pendulum']
+    available_systems = ['pendulum', 'double_pendulum']
     if args['system'] not in available_systems:
-        raise ValueError('System not available. Available: ' + str(list(available_systems.keys())))
+        raise ValueError('System not available. Available: ', available_systems)
     params = Parameters(args['system'], rnea=False) 
     model = AdamModel(params)
     simulator = SimDynamics(model)
@@ -154,6 +154,20 @@ if __name__ == '__main__':
         # print('Total number of points: %d' % len(x_save))
         np.save(params.DATA_DIR + str(model.nq) + 'dof_vboc', np.asarray(x_data))
         np.save(params.DATA_DIR + str(model.nq) + 'dof_traj', np.asarray(x_traj))
+
+        # Plot points
+        plt.figure()
+        if args['system'] == 'double_pendulum':
+            plt.scatter(x_data[:, 0], x_data[:, 2], s=1, label='q1')
+            plt.scatter(x_data[:, 1], x_data[:, 3], s=1, label='q2')
+        else:
+            plt.scatter(x_data[:, 0], x_data[:, 1], s=1, label='q')
+        plt.xlabel('q')
+        plt.ylabel('dq')
+        plt.xlim([params.q_min, params.q_max])
+        plt.ylim([params.dq_min, params.dq_max])
+        plt.legend()
+        plt.savefig(params.DATA_DIR + f'{model.nq}dof_vboc.png')
 
     # TRAINING
     if args['training']:

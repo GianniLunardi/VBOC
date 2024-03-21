@@ -7,7 +7,7 @@ import argparse
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--system', type=str, default='double_pendulum',
-                        help='Systems to test. Available: double_pendulum. WIP: ur5, z1')
+                        help='Systems to test. Available: pendulum, double_pendulum. WIP: ur5, z1')
     parser.add_argument('-v', '--vboc', action='store_true',
                         help='Compute data on border of the viability kernel')
     parser.add_argument('--horizon', type=int, default=False, const=100, nargs='?',

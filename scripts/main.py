@@ -19,7 +19,7 @@ def computeDataOnBorder(N_guess, test_flag=0):
     # Randomize the initial state
     d = np.array([random.uniform(-1, 1) for _ in range(model.nv)])
     q = np.array([
-        random.uniform(params.q_min + model.eps, params.q_max - model.eps)
+        random.uniform(model.q_min + model.eps, model.q_max - model.eps)
         for _ in range(model.nq)]
     )
 
@@ -31,8 +31,8 @@ def computeDataOnBorder(N_guess, test_flag=0):
     if not test_flag:
         # Dense sampling near the joint position bounds
         vel_dir = random.choice([-1, 1])
-        q_init = params.q_min + model.eps if vel_dir == -1 else params.q_max - model.eps
-        q_fin = params.q_max - model.eps if vel_dir == -1 else params.q_min + model.eps
+        q_init = model.q_min + model.eps if vel_dir == -1 else model.q_max - model.eps
+        q_fin = model.q_max - model.eps if vel_dir == -1 else model.q_min + model.eps
         i = random.choice(range(model.nq))
         d[i] = random.random() * vel_dir
         q[i] = q_init
@@ -164,8 +164,8 @@ if __name__ == '__main__':
             plt.scatter(x_data[:, 0], x_data[:, 1], s=1, label='q')
         plt.xlabel('q')
         plt.ylabel('dq')
-        plt.xlim([params.q_min, params.q_max])
-        plt.ylim([params.dq_min, params.dq_max])
+        plt.xlim([model.q_min, model.q_max])
+        plt.ylim([model.dq_min, model.dq_max])
         plt.legend()
         plt.savefig(params.DATA_DIR + f'{model.nq}dof_vboc.png')
 
@@ -231,7 +231,7 @@ if __name__ == '__main__':
         nn_data = torch.load(params.NN_DIR + 'model_' + str(model.nq) + 'dof.pt')
         nn_model = NeuralNetwork(model.nx, (model.nx - 1) * 100, 1)
         nn_model.load_state_dict(nn_data['model'])
-        plot_viability_kernel(model.nq, params, nn_model, nn_data['mean'], nn_data['std'], N)
+        plot_viability_kernel(model.nq, params, model, nn_model, nn_data['mean'], nn_data['std'], N)
     plt.show()
 
     elapsed_time = time.time() - start_time

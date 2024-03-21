@@ -81,10 +81,10 @@ class RegressionNN:
         return y_pred, np.sqrt(np.mean((y_pred - y_test)**2))
 
 
-def plot_viability_kernel(nq, params, model, mean, std, horizon=100, grid=1e-2):
+def plot_viability_kernel(nq, params, model, nn_model, mean, std, horizon=100, grid=1e-2):
     # Create the grid
-    q, v = np.meshgrid(np.arange(params.q_min, params.q_max, grid),
-                       np.arange(params.dq_min, params.dq_max, grid))
+    q, v = np.meshgrid(np.arange(model.q_min, model.q_max, grid),
+                       np.arange(model.dq_min, model.dq_max, grid))
     q_rav, v_rav = q.ravel(), v.ravel()
     n = len(q_rav)
 
@@ -93,7 +93,7 @@ def plot_viability_kernel(nq, params, model, mean, std, horizon=100, grid=1e-2):
             plt.figure()
 
             x = np.zeros((n, nq * 2))
-            x[:, :nq] = (params.q_max + params.q_min) / 2 * np.ones((n, nq))
+            x[:, :nq] = (model.q_max + model.q_min) / 2 * np.ones((n, nq))
             x[:, i] = q_rav
             x[:, nq + i] = v_rav
 
@@ -106,14 +106,15 @@ def plot_viability_kernel(nq, params, model, mean, std, horizon=100, grid=1e-2):
             x[:, nq:] /= y.reshape(len(y), 1)
 
             # Predict
-            y_pred = model(torch.from_numpy(x.astype(np.float32))).cpu().numpy()
+            y_pred = nn_model(torch.from_numpy(x.astype(np.float32))).cpu().numpy()
             out = np.array([0 if y[j] > y_pred[j] else 1 for j in range(n)])
             z = out.reshape(q.shape)
             plt.contourf(q, v, z, cmap='coolwarm', alpha=0.8)
-            plt.xlim([params.q_min, params.q_max])
-            plt.ylim([params.dq_min, params.dq_max])
+            plt.xlim([model.q_min, model.q_max])
+            plt.ylim([model.dq_min, model.dq_max])
             plt.xlabel('q_' + str(i + 1))
             plt.ylabel('dq_' + str(i + 1))
             plt.grid()
             plt.title(f"Classifier section joint {i + 1}, horizon {horizon}")
-            plt.savefig(params.DATA_DIR + f'{i + 1}dof_{horizon}_BRS.png')
+            title = 'rnea' if params.rnea else 'di'
+            plt.savefig(params.DATA_DIR + f'{i + 1}dof_{horizon}_BRS_{title}.png')

@@ -67,6 +67,10 @@ class AdamModel:
         self.x_max = np.hstack([joint_upper, joint_velocity])
         self.eps = params.state_tol
 
+        # TEMPORARY
+        self.q_min, self.q_max = joint_lower[0], joint_upper[0]
+        self.dq_min, self.dq_max = - joint_velocity[0], joint_velocity[0]
+
     def insideStateConstraints(self, x):
         return np.all(np.logical_and(x >= self.x_min + self.eps, x <= self.x_max - self.eps))
 

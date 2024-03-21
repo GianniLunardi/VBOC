@@ -42,7 +42,7 @@ class AdamModel:
         if params.rnea:
             self.amodel.f_impl_expr = self.f_impl
         else:
-            self.amodel.f_expl_expr = params.dt * self.f_expl
+            self.amodel.f_expl_expr = self.f_expl
         self.amodel.p = self.p
 
         self.nx = self.amodel.x.size()[0]
@@ -90,7 +90,7 @@ class SimDynamics:
         sim.model = model.amodel
         # T --> should be dt, but instead we multiply the dynamics by dt
         # this speed up the increment of the OCP horizon
-        sim.solver_options.T = self.params.dt if self.params.rnea else 1.
+        sim.solver_options.T = self.params.dt 
         sim.solver_options.integrator_type = self.params.integrator_type
         sim.solver_options.num_stages = self.params.num_stages
         sim.parameter_values = np.zeros(model.nv)
@@ -127,7 +127,7 @@ class AbstractController:
         self.ocp = AcadosOcp()
 
         # Dimensions
-        self.ocp.solver_options.tf = self.N * self.params.dt if self.params.rnea else self.N
+        self.ocp.solver_options.tf = self.params.T 
         self.ocp.dims.N = self.N
 
         # Model
@@ -213,8 +213,5 @@ class AbstractController:
 
     def resetHorizon(self, N):
         self.N = N
-        if self.params.rnea:
-            self.ocp_solver.set_new_time_steps(np.full(N, self.params.dt))
-        else:
-            self.ocp_solver.set_new_time_steps(np.full(N, 1.))
+        self.ocp_solver.set_new_time_steps(np.full(N, self.params.dt))
         self.ocp_solver.update_qp_solver_cond_N(N)

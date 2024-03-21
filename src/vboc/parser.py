@@ -28,9 +28,8 @@ def parse_args():
 
 
 class Parameters:
-    def __init__(self, urdf_name, rnea=False):
+    def __init__(self, urdf_name):
         self.urdf_name = urdf_name
-        self.rnea = rnea
         # Define all the useful paths
         self.PKG_DIR = os.path.dirname(os.path.abspath(__file__))
         self.ROOT_DIR = os.path.join(self.PKG_DIR, '../..')

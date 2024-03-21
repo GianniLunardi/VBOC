@@ -26,27 +26,16 @@ class AdamModel:
         self.u = MX.sym("u", nq)
         self.p = MX.sym("p", nq)
 
-        if params.rnea:
-            H_b = np.eye(4)
-            self.f_impl = vertcat(
-                self.x[nq:] - self.x_dot[:nq],
-                self.mass(H_b, self.x[:nq])[6:, 6:] @ self.x_dot[nq:] +
-                self.bias(H_b, self.x[:nq],  np.zeros(6), self.x[nq:])[6:] - self.u
-            )
-        else:    
-            self.f_expl = vertcat(self.x[nq:], self.u)
-            self.f_disc = vertcat(
-                self.x[:nq] + params.dt * self.x[nq:] + 0.5 * params.dt**2 * self.u,
-                self.x[nq:] + params.dt * self.u
-            ) 
+        self.f_expl = vertcat(self.x[nq:], self.u)
+        self.f_disc = vertcat(
+            self.x[:nq] + params.dt * self.x[nq:] + 0.5 * params.dt**2 * self.u,
+            self.x[nq:] + params.dt * self.u
+        ) 
             
         self.amodel.x = self.x
         self.amodel.xdot = self.x_dot
         self.amodel.u = self.u
-        if params.rnea:
-            self.amodel.f_impl_expr = self.f_impl
-        else:
-            self.amodel.f_expl_expr = self.f_expl
+        self.amodel.f_expl_expr = self.f_expl
         self.amodel.p = self.p
 
         self.nx = self.amodel.x.size()[0]
@@ -157,24 +146,18 @@ class AbstractController:
         self.ocp.constraints.ubx_e = self.model.x_max
         self.ocp.constraints.idxbx_e = np.arange(self.model.nx)
 
-        if self.params.rnea:
-            self.ocp.constraints.lbu = self.model.tau_min
-            self.ocp.constraints.ubu = self.model.tau_max
-            self.ocp.constraints.idxbu = np.arange(self.model.nu)    
-        else:
-            # Dynamics --> nonlinear constraint (if aba)
-            H_b = np.eye(4)                             # Base roto-translation matrix    
-            computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
-                              self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
-            self.model.amodel.con_h_expr_0 = computed_torque
-            self.model.amodel.con_h_expr = computed_torque
+        # Dynamics --> nonlinear constraint 
+        H_b = np.eye(4)                             # Base roto-translation matrix    
+        computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
+                            self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
+        self.model.amodel.con_h_expr_0 = computed_torque
+        self.model.amodel.con_h_expr = computed_torque
 
-            self.ocp.constraints.lh_0 = self.model.tau_min
-            self.ocp.constraints.uh_0 = self.model.tau_max
-            self.ocp.constraints.lh = self.model.tau_min
-            self.ocp.constraints.uh = self.model.tau_max
+        self.ocp.constraints.lh_0 = self.model.tau_min
+        self.ocp.constraints.uh_0 = self.model.tau_max
+        self.ocp.constraints.lh = self.model.tau_min
+        self.ocp.constraints.uh = self.model.tau_max
             
-
         # Additional constraints
         self.addConstraint()
 

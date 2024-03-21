@@ -115,7 +115,7 @@ if __name__ == '__main__':
     available_systems = ['pendulum', 'double_pendulum']
     if args['system'] not in available_systems:
         raise ValueError('System not available. Available: ', available_systems)
-    params = Parameters(args['system'], rnea=False) 
+    params = Parameters(args['system']) 
     model = AdamModel(params)
     simulator = SimDynamics(model)
     controller = ViabilityController(simulator)

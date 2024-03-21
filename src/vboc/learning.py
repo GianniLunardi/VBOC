@@ -116,5 +116,4 @@ def plot_viability_kernel(nq, params, model, nn_model, mean, std, horizon=100, g
             plt.ylabel('dq_' + str(i + 1))
             plt.grid()
             plt.title(f"Classifier section joint {i + 1}, horizon {horizon}")
-            title = 'rnea' if params.rnea else 'di'
-            plt.savefig(params.DATA_DIR + f'{i + 1}dof_{horizon}_BRS_{title}.png')
+            plt.savefig(params.DATA_DIR + f'{i + 1}dof_{horizon}_BRS.png')

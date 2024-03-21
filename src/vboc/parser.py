@@ -41,38 +41,31 @@ class Parameters:
         self.ROBOTS_DIR = os.path.join(self.ROOT_DIR, 'robots/')
         self.robot_urdf = f'{self.ROBOTS_DIR}/{urdf_name}_description/urdf/{urdf_name}.urdf'
 
-        model = yaml.load(open(self.CONF_DIR + 'model.yaml'), Loader=yaml.FullLoader)
-        self.q_min = (1 + float(model['q_min'])) * np.pi
-        self.q_max = (1 + float(model['q_max'])) * np.pi
-        self.dq_min = float(model['dq_min'])
-        self.dq_max = float(model['dq_max'])
-        self.tau_min = float(model['tau_min'])
-        self.tau_max = float(model['tau_max'])
-        self.state_tol = float(model['state_tol'])
+        parameters = yaml.load(open(self.ROOT_DIR + '/config.yaml'), Loader=yaml.FullLoader)
 
-        simulator = yaml.load(open(self.CONF_DIR + 'simulator.yaml'), Loader=yaml.FullLoader)
-        self.dt = float(simulator['dt'])
-        self.integrator_type = 'IRK' if rnea else 'ERK'
-        self.num_stages = int(simulator['num_stages'])
-
-        controller = yaml.load(open(self.CONF_DIR + 'controller.yaml'), Loader=yaml.FullLoader)
-        self.T = float(controller['T'])
-        self.prob_num = int(controller['prob_num'])
-        self.test_num = int(controller['test_num'])
-        self.n_steps = int(controller['n_steps'])
-        self.cpu_num = int(controller['cpu_num'])
-        self.regenerate = bool(controller['regenerate'])
+        self.prob_num = int(parameters['prob_num'])
+        self.test_num = int(parameters['test_num'])
+        self.n_steps = int(parameters['n_steps'])
+        self.cpu_num = int(parameters['cpu_num'])
+        self.regenerate = bool(parameters['regenerate'])
+        
+        self.T = float(parameters['T'])
+        self.dt = float(parameters['dt'])
+        self.integrator_type = parameters['integrator_type']
+        self.num_stages = int(parameters['num_stages'])
+        self.alpha = int(parameters['alpha'])
 
         self.solver_type = 'SQP'
-        self.solver_mode = controller['solver_mode']
-        self.nlp_max_iter = int(controller['nlp_max_iter'])
-        self.qp_max_iter = int(controller['qp_max_iter'])
-        self.qp_tol_stat = float(controller['qp_tol_stat'])
-        self.nlp_tol_stat = float(controller['nlp_tol_stat'])
-        self.alpha_reduction = float(controller['alpha_reduction'])
-        self.alpha_min = float(controller['alpha_min'])
-        self.levenberg_marquardt = float(controller['levenberg_marquardt'])
-        self.alpha = int(controller['alpha'])
-        self.conv_tol = float(controller['conv_tol'])
-        self.cost_tol = float(controller['cost_tol'])
+        self.solver_mode = parameters['solver_mode']
+        self.nlp_max_iter = int(parameters['nlp_max_iter'])
+        self.qp_max_iter = int(parameters['qp_max_iter'])
+        self.qp_tol_stat = float(parameters['qp_tol_stat'])
+        self.nlp_tol_stat = float(parameters['nlp_tol_stat'])
+        self.alpha_reduction = float(parameters['alpha_reduction'])
+        self.alpha_min = float(parameters['alpha_min'])
+        self.levenberg_marquardt = float(parameters['levenberg_marquardt'])
+
+        self.state_tol = float(parameters['state_tol'])
+        self.conv_tol = float(parameters['conv_tol'])
+        self.cost_tol = float(parameters['cost_tol'])
         self.globalization = 'MERIT_BACKTRACKING'

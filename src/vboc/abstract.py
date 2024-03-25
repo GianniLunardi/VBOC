@@ -4,16 +4,24 @@ from casadi import MX, vertcat
 from urdf_parser_py.urdf import URDF
 import adam
 from adam.casadi import KinDynComputations
-from acados_template import AcadosModel, AcadosSim, AcadosSimSolver, AcadosOcp, AcadosOcpSolver
+from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 
 
 class AdamModel:
-    def __init__(self, params):
+    def __init__(self, params, n_dofs=False):
         self.params = params
         self.amodel = AcadosModel()
         # Robot dynamics with Adam (IIT)
         robot = URDF.from_xml_file(params.robot_urdf)
-        joint_names = [joint.name for joint in robot.joints]
+        try:
+            n_dofs = n_dofs if n_dofs else len(robot.joints)
+            if n_dofs > len(robot.joints) or n_dofs < 1:
+                raise ValueError
+        except ValueError:
+            print(f'\nInvalid number of degrees of freedom! Must be > 1 and <= {len(robot.joints)}\n')
+            exit()
+        robot_joints = robot.joints[1:n_dofs+1] if params.urdf_name == 'z1' else robot.joints[:n_dofs]
+        joint_names = [joint.name for joint in robot_joints]
         dynamics = KinDynComputations(params.robot_urdf, joint_names, robot.get_root())        
         dynamics.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
         self.mass = dynamics.mass_matrix_fun()
@@ -25,17 +33,14 @@ class AdamModel:
         self.x_dot = MX.sym("x_dot", nq * 2)
         self.u = MX.sym("u", nq)
         self.p = MX.sym("p", nq)
-
-        self.f_expl = vertcat(self.x[nq:], self.u)
         self.f_disc = vertcat(
             self.x[:nq] + params.dt * self.x[nq:] + 0.5 * params.dt**2 * self.u,
             self.x[nq:] + params.dt * self.u
         ) 
             
         self.amodel.x = self.x
-        self.amodel.xdot = self.x_dot
         self.amodel.u = self.u
-        self.amodel.f_expl_expr = self.f_expl
+        self.amodel.disc_dyn_expr = self.f_disc
         self.amodel.p = self.p
 
         self.nx = self.amodel.x.size()[0]
@@ -45,10 +50,10 @@ class AdamModel:
         self.nv = nq
 
         # Joint limits
-        joint_lower = np.array([joint.limit.lower for joint in robot.joints])
-        joint_upper = np.array([joint.limit.upper for joint in robot.joints])
-        joint_velocity = np.array([joint.limit.velocity for joint in robot.joints])
-        joint_effort = np.array([joint.limit.effort for joint in robot.joints])
+        joint_lower = np.array([joint.limit.lower for joint in robot_joints])
+        joint_upper = np.array([joint.limit.upper for joint in robot_joints])
+        joint_velocity = np.array([joint.limit.velocity for joint in robot_joints])
+        joint_effort = np.array([joint.limit.effort for joint in robot_joints]) 
 
         self.tau_min = - joint_effort
         self.tau_max = joint_effort
@@ -79,46 +84,11 @@ class AdamModel:
         return np.logical_or(np.any(x < self.x_min + self.eps), np.any(x > self.x_max - self.eps))
 
 
-class SimDynamics:
-    def __init__(self, model):
-        self.model = model
-        self.params = model.params
-        sim = AcadosSim()
-        sim.model = model.amodel
-        # T --> should be dt, but instead we multiply the dynamics by dt
-        # this speed up the increment of the OCP horizon
-        sim.solver_options.T = self.params.dt 
-        sim.solver_options.integrator_type = self.params.integrator_type
-        sim.solver_options.num_stages = self.params.num_stages
-        sim.parameter_values = np.zeros(model.nv)
-        gen_name = self.params.GEN_DIR + '/sim_' + sim.model.name
-        sim.code_export_directory = gen_name
-        self.integrator = AcadosSimSolver(sim, build=self.params.regenerate, json_file=gen_name + '.json')
-
-    def simulate(self, x, u):
-        self.integrator.set("x", x)
-        self.integrator.set("u", u)
-        self.integrator.solve()
-        x_next = self.integrator.get("x")
-        return x_next
-
-    def checkDynamicsConstraints(self, x, u):
-        # Rollout the control sequence
-        n = np.shape(u)[0]
-        x_sim = np.zeros((n + 1, self.model.nx))
-        x_sim[0] = np.copy(x[0])
-        for i in range(n):
-            x_sim[i + 1] = self.simulate(x_sim[i], u[i])
-        # Check if the rollout state trajectory is almost equal to the optimal one
-        return np.linalg.norm(x - x_sim) < self.params.state_tol * np.sqrt(n+1)
-
-
 class AbstractController:
-    def __init__(self, simulator):
+    def __init__(self, model):
         self.ocp_name = "".join(re.findall('[A-Z][^A-Z]*', self.__class__.__name__)[:-1]).lower()
-        self.simulator = simulator
-        self.params = simulator.params
-        self.model = simulator.model
+        self.params = model.params
+        self.model = model
 
         self.N = int(self.params.T / self.params.dt)
         self.ocp = AcadosOcp()
@@ -149,7 +119,7 @@ class AbstractController:
         # Dynamics --> nonlinear constraint 
         H_b = np.eye(4)                             # Base roto-translation matrix    
         computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
-                            self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
+                          self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
         self.model.amodel.con_h_expr_0 = computed_torque
         self.model.amodel.con_h_expr = computed_torque
 
@@ -162,7 +132,7 @@ class AbstractController:
         self.addConstraint()
 
         # Solver options
-        self.ocp.solver_options.integrator_type = self.params.integrator_type
+        self.ocp.solver_options.integrator_type = "DISCRETE"
         self.ocp.solver_options.hessian_approx = "EXACT"
         self.ocp.solver_options.exact_hess_constr = 0
         self.ocp.solver_options.exact_hess_dyn = 0

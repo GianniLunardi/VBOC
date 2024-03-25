@@ -81,19 +81,21 @@ class RegressionNN:
         return y_pred, np.sqrt(np.mean((y_pred - y_test)**2))
 
 
-def plot_viability_kernel(nq, params, model, nn_model, mean, std, horizon=100, grid=1e-2):
+def plot_viability_kernel(params, model, nn_model, mean, std, horizon=100, grid=1e-2):
     # Create the grid
-    q, v = np.meshgrid(np.arange(model.q_min, model.q_max, grid),
-                       np.arange(model.dq_min, model.dq_max, grid))
-    q_rav, v_rav = q.ravel(), v.ravel()
-    n = len(q_rav)
+    nq = model.nq
 
     for i in range(nq):
         with torch.no_grad():
             plt.figure()
 
-            x = np.zeros((n, nq * 2))
-            x[:, :nq] = (model.q_max + model.q_min) / 2 * np.ones((n, nq))
+            q, v = np.meshgrid(np.arange(model.x_min[i], model.x_max[i], grid),
+                               np.arange(model.x_min[i + nq], model.x_max[i + nq], grid))
+            q_rav, v_rav = q.ravel(), v.ravel()
+            n = len(q_rav)
+
+            x_static = (model.x_max + model.x_min) / 2
+            x = np.repeat(x_static.reshape(1, len(x_static)), n, axis=0)
             x[:, i] = q_rav
             x[:, nq + i] = v_rav
 
@@ -110,8 +112,8 @@ def plot_viability_kernel(nq, params, model, nn_model, mean, std, horizon=100, g
             out = np.array([0 if y[j] > y_pred[j] else 1 for j in range(n)])
             z = out.reshape(q.shape)
             plt.contourf(q, v, z, cmap='coolwarm', alpha=0.8)
-            plt.xlim([model.q_min, model.q_max])
-            plt.ylim([model.dq_min, model.dq_max])
+            plt.xlim([model.x_min[i], model.x_max[i]])
+            plt.ylim([model.x_min[i + nq], model.x_max[i + nq]])
             plt.xlabel('q_' + str(i + 1))
             plt.ylabel('dq_' + str(i + 1))
             plt.grid()

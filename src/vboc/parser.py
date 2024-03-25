@@ -7,10 +7,12 @@ import argparse
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--system', type=str, default='double_pendulum',
-                        help='Systems to test. Available: pendulum, double_pendulum. WIP: ur5, z1')
+                        help='Systems to test. Available: pendulum, double_pendulum, ur5, z1')
+    parser.add_argument('--dofs', type=int, default=False, nargs='?',
+                        help='Number of desired degrees of freedom of the system')
     parser.add_argument('-v', '--vboc', action='store_true',
                         help='Compute data on border of the viability kernel')
-    parser.add_argument('--horizon', type=int, default=False, const=100, nargs='?',
+    parser.add_argument('--horizon', type=int, default=False, nargs='?',
                         help='Horizon of the optimal control problem')
     parser.add_argument('-t', '--training', action='store_true',
                         help='Train the neural network model that approximates the viability kernel')
@@ -38,7 +40,11 @@ class Parameters:
         self.GEN_DIR = os.path.join(self.ROOT_DIR, 'generated/')
         self.NN_DIR = os.path.join(self.ROOT_DIR, 'nn_models/' + urdf_name + '/')
         self.ROBOTS_DIR = os.path.join(self.ROOT_DIR, 'robots/')
-        self.robot_urdf = f'{self.ROBOTS_DIR}/{urdf_name}_description/urdf/{urdf_name}.urdf'
+        # temp solution
+        if urdf_name == 'ur5':
+            self.robot_urdf = f'{self.ROBOTS_DIR}/ur_description/urdf/{urdf_name}_robot.urdf'
+        else:
+            self.robot_urdf = f'{self.ROBOTS_DIR}/{urdf_name}_description/urdf/{urdf_name}.urdf'
 
         parameters = yaml.load(open(self.ROOT_DIR + '/config.yaml'), Loader=yaml.FullLoader)
 
@@ -50,8 +56,6 @@ class Parameters:
         
         self.T = float(parameters['T'])
         self.dt = float(parameters['dt'])
-        self.integrator_type = parameters['integrator_type']
-        self.num_stages = int(parameters['num_stages'])
         self.alpha = int(parameters['alpha'])
 
         self.solver_type = 'SQP'

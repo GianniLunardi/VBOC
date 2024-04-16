@@ -22,10 +22,10 @@ class AdamModel:
             exit()
         robot_joints = robot.joints[1:n_dofs+1] if params.urdf_name == 'z1' else robot.joints[:n_dofs]
         joint_names = [joint.name for joint in robot_joints]
-        dynamics = KinDynComputations(params.robot_urdf, joint_names, robot.get_root())        
-        dynamics.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
-        self.mass = dynamics.mass_matrix_fun()
-        self.bias = dynamics.bias_force_fun()
+        kin_dyn = KinDynComputations(params.robot_urdf, joint_names, robot.get_root())        
+        kin_dyn.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
+        self.mass = kin_dyn.mass_matrix_fun()       # Mass matrix
+        self.bias = kin_dyn.bias_force_fun()        # Nonlinear effects  
         nq = len(joint_names)
 
         self.amodel.name = params.urdf_name
@@ -61,9 +61,8 @@ class AdamModel:
         self.x_max = np.hstack([joint_upper, joint_velocity])
         self.eps = params.state_tol
 
-        # TEMPORARY
-        self.q_min, self.q_max = joint_lower[0], joint_upper[0]
-        self.dq_min, self.dq_max = - joint_velocity[0], joint_velocity[0]
+        # Forward kinematics
+        self.fk = kin_dyn.forward_kinematics_fun('link2')
 
     def insideStateConstraints(self, x):
         return np.all(np.logical_and(x >= self.x_min + self.eps, x <= self.x_max - self.eps))
@@ -116,17 +115,35 @@ class AbstractController:
         self.ocp.constraints.ubx_e = self.model.x_max
         self.ocp.constraints.idxbx_e = np.arange(self.model.nx)
 
-        # Dynamics --> nonlinear constraint 
-        H_b = np.eye(4)                             # Base roto-translation matrix    
+        # Nonlinear constraint --> dynamics 
+        #                      --> table and/or wall 
+        #                      --> obstacle (sphere)
+        H_b = np.eye(4)     # Base roto-translation matrix   
+        T_ee = self.model.fk(H_b, self.model.x[:self.model.nq]) 
+        t_loc = np.array([0., 0., 0.2])
+        T_ee[:3, 3] += T_ee[:3, :3] @ t_loc
         computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
                           self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
-        self.model.amodel.con_h_expr_0 = computed_torque
-        self.model.amodel.con_h_expr = computed_torque
+        
+        # self.model.amodel.con_h_expr_0 = computed_torque
+        # self.model.amodel.con_h_expr = computed_torque
 
-        self.ocp.constraints.lh_0 = self.model.tau_min
-        self.ocp.constraints.uh_0 = self.model.tau_max
-        self.ocp.constraints.lh = self.model.tau_min
-        self.ocp.constraints.uh = self.model.tau_max
+        # self.ocp.constraints.lh_0 = self.model.tau_min
+        # self.ocp.constraints.uh_0 = self.model.tau_max
+        # self.ocp.constraints.lh = self.model.tau_min
+        # self.ocp.constraints.uh = self.model.tau_max
+        
+        self.model.amodel.con_h_expr_0 = vertcat(computed_torque, T_ee[2, 3])   
+        self.model.amodel.con_h_expr = vertcat(computed_torque, T_ee[2, 3])
+        self.model.amodel.con_h_expr_e = T_ee[2, 3]
+
+        z_bounds = np.array([-0.25, 1e6])
+        self.ocp.constraints.lh_0 = np.hstack([self.model.tau_min, z_bounds[0]])
+        self.ocp.constraints.uh_0 = np.hstack([self.model.tau_max, z_bounds[1]])
+        self.ocp.constraints.lh = np.hstack([self.model.tau_min, z_bounds[0]])
+        self.ocp.constraints.uh = np.hstack([self.model.tau_max, z_bounds[1]])
+        self.ocp.constraints.lh_e = np.array([z_bounds[0]])
+        self.ocp.constraints.uh_e = np.array([z_bounds[1]])
             
         # Additional constraints
         self.addConstraint()

@@ -96,10 +96,10 @@
       link="link1" />
     <axis
       xyz="1 0 0" />
-    <!-- lower = 3/4 pi, upper = 5/4 pi, effort = 0.8, velocity = 10 -->
+    <!-- lower = -5/4 pi, upper = -3/4 pi, effort = 0.8, velocity = 10 -->
     <limit
-      lower="2.3561945"   
-      upper="3.9269908"
+      lower="-3.9269908"
+      upper="-2.3561945"
       effort="0.8"
       velocity="10" />
     <dynamics
@@ -157,10 +157,10 @@
       link="link2" />
     <axis
       xyz="1 0 0" />
-    <!-- lower = 3/4 pi, upper = 5/4 pi, effort = 0.8, velocity = 10 -->
+    <!-- lower = -1/4 pi, upper = 1/4 pi, effort = 0.8, velocity = 10 -->
     <limit
-      lower="2.3561945"
-      upper="3.9269908"
+      lower="-0.7853982"
+      upper="0.7853982" 
       effort="0.8"
       velocity="10" />
     <dynamics

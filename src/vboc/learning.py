@@ -10,6 +10,7 @@ class NeuralNetwork(nn.Module):
     """ A simple feedforward neural network with 3 layers (1 hidden). """
     def __init__(self, input_size, hidden_size, output_size, activation=nn.ReLU()):
         super().__init__()
+        # FIXME: change linear_relu_stack to linear_stack
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             activation,
@@ -40,7 +41,7 @@ class RegressionNN:
         n = len(x_train)
         val = np.amax(y_train)
         b = int(n * 100 / self.batch_size)          # number of iterations for 100 epochs
-        max_iter = b * 10
+        max_iter = b * 20
         evolution = []
         self.model.train()
         while val > 1e-3 and t < max_iter:

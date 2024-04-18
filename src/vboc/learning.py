@@ -82,12 +82,12 @@ class RegressionNN:
         return y_pred, np.sqrt(np.mean((y_pred - y_test)**2))
 
 
-def plot_viability_kernel(params, model, nn_model, mean, std, horizon=100, grid=1e-2):
+def plot_viability_kernel(params, model, nn_model, mean, std, dataset, horizon=100, grid=1e-2):
     # Create the grid
     nq = model.nq
 
-    for i in range(nq):
-        with torch.no_grad():
+    with torch.no_grad():
+        for i in range(nq):
             plt.figure()
 
             q, v = np.meshgrid(np.arange(model.x_min[i], model.x_max[i], grid),
@@ -113,6 +113,19 @@ def plot_viability_kernel(params, model, nn_model, mean, std, horizon=100, grid=
             out = np.array([0 if y[j] > y_pred[j] else 1 for j in range(n)])
             z = out.reshape(q.shape)
             plt.contourf(q, v, z, cmap='coolwarm', alpha=0.8)
+
+            # Plot of the viable samples
+            x_viable = np.empty((0, 2))
+            rm_idx = [i, nq + i]
+            idx = np.isin(np.arange(2 * nq), rm_idx, invert=True)
+            for x_star in dataset:
+                # Remove the part relative to the considerd joint
+                x_static = x_star[idx]
+                if np.linalg.norm(x_static[:nq -1] - np.ones(nq - 1) * (params.q_max + params.q_min) / 2) < 0.01 \
+                  and np.linalg.norm(x_static[nq - 1:]) < 0.1:
+                    x_viable = np.vstack([x_viable, np.array([x_star[i], x_star[nq + i]])])
+            plt.plot(x_viable[:, 0], x_viable[:, 1], 'go', markersize=2)
+
             plt.xlim([model.x_min[i], model.x_max[i]])
             plt.ylim([model.x_min[i + nq], model.x_max[i + nq]])
             plt.xlabel('q_' + str(i + 1))

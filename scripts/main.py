@@ -12,7 +12,7 @@ from vboc.controller import ViabilityController
 from vboc.learning import NeuralNetwork, RegressionNN, plot_viability_kernel
 
 
-def computeDataOnBorder(q, N_guess, test_flag=0):
+def computeDataOnBorder(N_guess, uniform_flag=0):
     valid_data = np.empty((0, model.nx))
     controller.resetHorizon(N_guess)
 
@@ -24,7 +24,7 @@ def computeDataOnBorder(q, N_guess, test_flag=0):
     u_guess = np.zeros((N_guess, model.nu))
     x_guess[:, :nq] = np.full((N_guess, nq), q)
 
-    if not test_flag:
+    if not uniform_flag:
         # Dense sampling near the joint position bounds
         vel_dir = random.choice([-1, 1])
         i = random.choice(range(nq))
@@ -40,9 +40,9 @@ def computeDataOnBorder(q, N_guess, test_flag=0):
     # Solve the OCP
     x_star, u_star, N = controller.solveVBOC(q, d, N_guess, n=N_increment, repeat=50)
     if x_star is None:
-        return None, None
-    if test_flag:
-        return x_star[0], x_star
+        return None
+    if uniform_flag:
+        return x_star[0]
     # Add a final node
     x_star = np.vstack([x_star, x_star[-1]])
     # Save the initial state as valid data
@@ -51,16 +51,16 @@ def computeDataOnBorder(q, N_guess, test_flag=0):
     # Generate unviable sample in the cost direction
     x_tilde = np.full((N + 1, model.nx), None)
     x_tilde[0] = np.copy(x_star[0])
-    x_tilde[0, nq:] -= model.eps * d
+    # Acados optimization is a minimization problem, but we want to maximize the velocity norm
+    # d points on the opposite direction wrt the optimizer, so we use the minus sign  
+    x_tilde[0, model.nq:] -= model.eps * d
 
     x_limit = True if model.checkVelocityBounds(x_tilde[0, nq:]) else False
 
     # Iterate along the trajectory to verify the viability of the solution
     for j in range(1, N):
         if x_limit:
-            if model.checkStateBounds(x_star[j]):
-                x_limit = True
-            else:
+            if not model.checkStateBounds(x_star[j]):
 
                 if model.checkPositionBounds(x_star[j - 1, :nq]):
                     break
@@ -99,8 +99,9 @@ def computeDataOnBorder(q, N_guess, test_flag=0):
                               + 0.5 * params.dt**2 * u_star[j - 1]
             x_tilde[j, nq:] = x_tilde[j - 1, nq:] + params.dt * u_star[j - 1]
             x_limit = True if model.checkStateBounds(x_tilde[j]) else False
-        if model.insideStateConstraints(x_star[j]):
+        if not model.checkStateBounds(x_star[j]):
             valid_data = np.vstack([valid_data, x_star[j]])
+        # valid_data = np.vstack([valid_data, x_star[j]])
     return valid_data
 
 
@@ -131,15 +132,15 @@ if __name__ == '__main__':
     N = 100
     N_increment = 1
     horizon = args['horizon']
-    if horizon:
-        N = horizon
-        N_increment = 0   
     try:
-        if horizon < 0:
+        if horizon < 1:
             raise ValueError
     except ValueError:
         print('\nThe horizon must be greater than 0!\n')
         exit()
+    if horizon < N:
+        N = horizon
+        N_increment = 0   
 
     # DATA GENERATION
     if args['vboc']:
@@ -148,14 +149,17 @@ if __name__ == '__main__':
         print('Start data generation')
         with Pool(params.cpu_num) as p:
             # inputs --> (horizon, flag to compute only the initial state)
-            # TRIAL --> uniform sampling of the initial state --> test_flag = 1
-            res = p.starmap(computeDataOnBorder, [(q0, N, 1) for q0 in q_init])
-
-        data, traj = zip(*res)
-        x_data = np.array([i for i in data if i is not None])
-        # x_save = np.array([i for f in x_data for i in f])
-        x_traj = [i for i in traj if i is not None]
-
+            # uniform sampling of the initial state --> uniform = 1
+            res = p.starmap(computeDataOnBorder, [(q0, N, 0) for q0 in q_init])
+        
+        # SEQUENTIAL
+        # res = []
+        # for i in range(params.prob_num):
+        #     res.append(computeDataOnBorder(N, 0))
+        
+        x_data = [i for i in res if i is not None]
+        x_save = np.vstack(x_data)
+    
         solved = len(x_data)
         print('Solved/numb of problems: %.3f' % (solved / params.prob_num))
         # print('Saved/tot: %.3f' % (len(x_save) / (solved * N)))
@@ -206,7 +210,6 @@ if __name__ == '__main__':
         with Pool(params.cpu_num) as p:
             data = p.starmap(computeDataOnBorder, [(q0, N, 1) for q0 in q_test])
 
-        data, _ = zip(*data)
         x_test = np.array([i for i in data if i is not None])
         y_test = np.linalg.norm(x_test[:, nq:], axis=1).reshape(len(x_test), 1)
         x_test[:, :nq] = (x_test[:, :nq] - mean) / std
@@ -228,16 +231,17 @@ if __name__ == '__main__':
         plt.plot(evolution)
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
-        plt.title(f'Training evolution, horion {N}')
+        plt.title(f'Training evolution, horizon {N}')
         plt.savefig(params.DATA_DIR + f'evolution_{N}.png')
 
     # PLOT THE VIABILITY KERNEL
     if args['plot']:
-        nn_data = torch.load(params.NN_DIR + 'model_' + str(nq) + 'dof.pt')
+        dataset = np.load(params.DATA_DIR + str(model.nq) + 'dof_vboc.npy')
+        nn_data = torch.load(params.NN_DIR + 'model_' + str(model.nq) + 'dof.pt')
         nn_model = NeuralNetwork(model.nx, (model.nx - 1) * 100, 1)
         nn_model.load_state_dict(nn_data['model'])
-        plot_viability_kernel(params, model, nn_model, nn_data['mean'], nn_data['std'], N)
-    # plt.show()
+        plot_viability_kernel(model.nq, params, nn_model, nn_data['mean'], nn_data['std'], dataset, N)
+    plt.show()
 
     elapsed_time = time.time() - start_time
     hours = int(elapsed_time // 3600)

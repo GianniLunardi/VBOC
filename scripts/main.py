@@ -1,19 +1,22 @@
 import os
 import time 
-import pickle
 import random
 import numpy as np
 import matplotlib.pyplot as plt
-import torch
+from tqdm import tqdm
 from multiprocessing import Pool
+from urdf_parser_py.urdf import URDF
+import adam 
+from adam.numpy import KinDynComputations as KinDynNumpy
+from adam.casadi import KinDynComputations as KinDynCasadi
+import torch
 from vboc.parser import Parameters, parse_args
 from vboc.abstract import AdamModel
 from vboc.controller import ViabilityController
 from vboc.learning import NeuralNetwork, RegressionNN, plot_viability_kernel
 
 
-def computeDataOnBorder(N_guess, uniform_flag=0):
-    valid_data = np.empty((0, model.nx))
+def computeDataOnBorder(q, N_guess):
     controller.resetHorizon(N_guess)
 
     # Randomize the initial state
@@ -24,85 +27,55 @@ def computeDataOnBorder(N_guess, uniform_flag=0):
     u_guess = np.zeros((N_guess, model.nu))
     x_guess[:, :nq] = np.full((N_guess, nq), q)
 
-    if not uniform_flag:
-        # Dense sampling near the joint position bounds
-        vel_dir = random.choice([-1, 1])
-        i = random.choice(range(nq))
-        q_init = model.x_min[i] + model.eps if vel_dir == -1 else model.x_max[i] - model.eps
-        q_fin = model.x_max[i] - model.eps if vel_dir == -1 else model.x_min[i] + model.eps
-        d[i] = random.random() * vel_dir
-        q[i] = q_init
-        x_guess[:, i] = np.linspace(q_init, q_fin, N_guess)
-
     d /= np.linalg.norm(d)
     controller.setGuess(x_guess, u_guess)
 
     # Solve the OCP
-    x_star, u_star, N = controller.solveVBOC(q, d, N_guess, n=N_increment, repeat=50)
+    x_star, _, _, status = controller.solveVBOC(q, d, N_guess, n=N_increment, repeat=50)
     if x_star is None:
-        return None
-    if uniform_flag:
-        return x_star[0]
-    # Add a final node
-    x_star = np.vstack([x_star, x_star[-1]])
-    # Save the initial state as valid data
-    valid_data = np.vstack([valid_data, x_star[0]])
+        return None, None, status
+    else:
+        return x_star[0], x_star, status
+    
 
-    # Generate unviable sample in the cost direction
-    x_tilde = np.full((N + 1, model.nx), None)
-    x_tilde[0] = np.copy(x_star[0])
-    # Acados optimization is a minimization problem, but we want to maximize the velocity norm
-    # d points on the opposite direction wrt the optimizer, so we use the minus sign  
-    x_tilde[0, model.nq:] -= model.eps * d
+def fixedVelocityDir(N_guess, n_pts=200):
+    """ Compute data on section of the viability kernel"""
+    controller.resetHorizon(N_guess)
+    x_sec = np.empty((0, model.nx))
+    x_tot = np.empty_like(x_sec)
+    x_traj = []
+    sep = np.zeros(nq)
+    for i in range(nq):
+        j = 0
+        jj = 0
+        while j < n_pts:
+            q_try = (model.x_max[:nq] + model.x_min[:nq]) / 2
+            q_try[i] = np.random.uniform(model.x_min[i], model.x_max[i])
+            
+            if params.obs_flag:
+                T_ee = kin_dyn_np.forward_kinematics(params.frame_name, np.eye(4), q_try)
+                t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ model.t_loc
+                if t_glob[2] <= model.z_bounds[0]:
+                    continue
+                x_tot = np.vstack([x_tot, np.hstack([q_try, np.zeros(model.nv)])])
+                jj += 1
 
-    x_limit = True if model.checkVelocityBounds(x_tilde[0, nq:]) else False
+            x_guess = np.zeros((N_guess, model.nx))
+            u_guess = np.zeros((N_guess, model.nu))
+            x_guess[:, :nq] = np.full((N_guess, nq), q_try)
 
-    # Iterate along the trajectory to verify the viability of the solution
-    for j in range(1, N):
-        if x_limit:
-            if not model.checkStateBounds(x_star[j]):
+            d = np.zeros(model.nv)
+            d[i] = random.choice([-1, 1])
 
-                if model.checkPositionBounds(x_star[j - 1, :nq]):
-                    break
-
-                gamma = np.linalg.norm(x_star[j, nq:])
-                d = - x_star[j, nq:]
-                d /= np.linalg.norm(d)
-                controller.resetHorizon(N - j)
-                controller.setGuess(x_star[j:N], u_star[j:N])
-                x_new, u_new, _ = controller.solveVBOC(x_star[j, :nq], d, N - j, n=N_increment, repeat=5)
-                if x_new is not None:
-                    x0 = controller.ocp_solver.get(0, 'x')
-                    gamma_new = np.linalg.norm(x0[nq:])
-                    if gamma_new > gamma + controller.tol:
-                        # Update the optimal trajectory
-                        x_star[j:N], u_star[j:N] = x_new[:N - j], u_new[:N - j]
-
-                        # Create unviable state
-                        x_tilde[j] = np.copy(x_star[j])
-                        x_tilde[j, nq:] += model.eps * x_tilde[j, nq:] / gamma_new
-
-                        # Check if the unviable state is on bound
-                        x_limit = True if model.checkVelocityBounds(x_tilde[j, nq:]) else False
-
-                    else:
-                        x_limit = False
-                        x_tilde[j] = np.copy(x_star[j])
-                        x_tilde[j, nq:] -= model.eps * d
-                else:
-                    for k in range(j, N):
-                        if model.checkVelocityBounds(x_star[k, nq:]):
-                            valid_data = np.vstack([valid_data, x_star[k]])
-                    break
-        else:
-            x_tilde[j, :nq] = x_tilde[j - 1, :nq] + params.dt * x_tilde[j - 1, nq:]  \
-                              + 0.5 * params.dt**2 * u_star[j - 1]
-            x_tilde[j, nq:] = x_tilde[j - 1, nq:] + params.dt * u_star[j - 1]
-            x_limit = True if model.checkStateBounds(x_tilde[j]) else False
-        if not model.checkStateBounds(x_star[j]):
-            valid_data = np.vstack([valid_data, x_star[j]])
-        # valid_data = np.vstack([valid_data, x_star[j]])
-    return valid_data
+            controller.setGuess(x_guess, u_guess)
+            x_star, _, _, _ = controller.solveVBOC(q_try, d, N_guess, n=N_increment, repeat=50)
+            if x_star is not None:
+                x_sec = np.vstack([x_sec, x_star[0]])
+                j += 1
+                x_traj.append(x_star)
+        sep[i] = jj
+    return x_sec, x_tot, sep, x_traj
+                
 
 
 if __name__ == '__main__':
@@ -111,7 +84,7 @@ if __name__ == '__main__':
 
     args = parse_args()
     # Define the available systems
-    available_systems = ['pendulum', 'double_pendulum', 'ur5', 'z1']
+    available_systems = ['pendulum', 'double_pendulum', 'ur5', 'z1', 'dsr']
     try:
         if args['system'] not in available_systems:
             raise NameError
@@ -119,7 +92,26 @@ if __name__ == '__main__':
         print('\nSystem not available! Available: ', available_systems, '\n')
         exit()
     params = Parameters(args['system']) 
-    model = AdamModel(params, n_dofs=args['dofs'])
+
+    # Load the model of the robot
+    robot = URDF.from_xml_file(params.robot_urdf)
+    
+    try:
+        n_dofs = args['dofs'] if args['dofs'] else len(robot.joints)
+        if n_dofs > len(robot.joints) or n_dofs < 1:
+            raise ValueError
+    except ValueError:
+        print(f'\nInvalid number of degrees of freedom! Must be >= 1 and <= {len(robot.joints)}\n')
+        exit()
+
+    robot_joints = robot.joints[1:n_dofs+1] if params.urdf_name == 'z1' else robot.joints[:n_dofs]
+    joint_names = [joint.name for joint in robot_joints]
+    kin_dyn_np = KinDynNumpy(params.robot_urdf, joint_names, robot.get_root())
+    kin_dyn_cs = KinDynCasadi(params.robot_urdf, joint_names, robot.get_root())
+    kin_dyn_np.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
+    kin_dyn_cs.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
+
+    model = AdamModel(params, kin_dyn_cs, robot_joints, n_dofs)
     controller = ViabilityController(model)
     nq = model.nq
 
@@ -141,79 +133,109 @@ if __name__ == '__main__':
     if horizon < N:
         N = horizon
         N_increment = 0   
+    obs_string = '_obs' if params.obs_flag else ''
+    nn_filename = f'{params.NN_DIR}model_{nq}dof{obs_string}.pt'
 
     # DATA GENERATION
     if args['vboc']:
-        # Generate all the initial condition
-        q_init = np.random.uniform(model.x_min[:nq], model.x_max[:nq], size=(params.prob_num, nq))
+        # Generate all the initial condition (training + test)
+        if params.obs_flag:
+            progress_bar = tqdm(total=params.prob_num + params.test_num, desc='ICs')
+            i = 0
+            H_b = np.eye(4)
+            q_init = np.empty((0, nq)) 
+            while i < params.prob_num + params.test_num:
+                q_try = np.random.uniform(model.x_min[:nq], model.x_max[:nq])
+                T_ee = kin_dyn_np.forward_kinematics(params.frame_name, H_b, q_try)
+                t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ model.t_loc 
+                # if t_glob[2] > -0.25:
+                if t_glob[2] > model.z_bounds[0]: #and t_glob[0] > model.x_bounds[0]:
+                    q_init = np.vstack([q_init, q_try])
+                    i += 1
+                    progress_bar.update(1)
+            progress_bar.close()
+        else:
+            # No obstacles --> random initial conditions inside the bounds
+            q_init = np.random.uniform(model.x_min[:nq], model.x_max[:nq], 
+                                       size=(params.prob_num + params.test_num, nq))
+
         print('Start data generation')
         with Pool(params.cpu_num) as p:
-            # inputs --> (horizon, flag to compute only the initial state)
-            # uniform sampling of the initial state --> uniform = 1
-            res = p.starmap(computeDataOnBorder, [(q0, N, 0) for q0 in q_init])
+            # inputs --> (initial random configuration, horizon)
+            res = p.starmap(computeDataOnBorder, [(q0, N) for q0 in q_init])
         
-        # SEQUENTIAL
-        # res = []
-        # for i in range(params.prob_num):
-        #     res.append(computeDataOnBorder(N, 0))
-        
-        x_data = [i for i in res if i is not None]
-        x_save = np.vstack(x_data)
+        x_data_temp, x_traj_temp, status = zip(*res)
+        x_data = np.vstack([i for i in x_data_temp if i is not None])
+        x_traj = np.asarray([i for i in x_traj_temp if i is not None])
+        print(x_traj.shape)
+
+        # Velocity Norm of last state
+        # print(np.linalg.norm(x_traj[:, nq:], axis=1))
+        # for i in range(len(x_traj)):
+        #     print('State: ', x_traj[i, -1, :], ',Vel norm:', np.linalg.norm(x_traj[i, -1, nq:]) )
     
         solved = len(x_data)
-        print('Solved/numb of problems: %.3f' % (solved / params.prob_num))
-        # print('Saved/tot: %.3f' % (len(x_save) / (solved * N)))
-        # print('Total number of points: %d' % len(x_save))
-        np.save(params.DATA_DIR + str(nq) + 'dof_vboc', np.asarray(x_data))
-        np.save(params.DATA_DIR + str(nq) + 'dof_traj', np.asarray(x_traj))
+        print('Solved/numb of problems: %.3f' % (solved / (params.prob_num + params.test_num)))
+        print('Total number of points: %d' % len(x_data))
+        np.save(params.DATA_DIR + str(nq) + 'dof_vboc', x_data)
+        np.save(params.DATA_DIR + 'traj_vboc', x_traj)
 
-        # Plot points (no sense if more than 2 dofs)
-        if nq < 3: 
-            plt.figure()
-            for i in range(nq):
-                plt.scatter(x_data[:, i], x_data[:, i + nq], s=1, label=f'q_{i + 1}')
-            plt.xlabel('q')
-            plt.ylabel('dq')
-            plt.legend()
-            plt.savefig(params.DATA_DIR + f'{nq}dof_vboc.png')
+        # plt.figure()
+        # plt.grid()
+        # plt.scatter(x_data[:, 0], x_data[:, 2], color='darkorange', s=5, label='q1')
+        # plt.scatter(x_data[:, 1], x_data[:, 3], color='darkgreen', s=5, label='q2')
+        # plt.xlabel('q')
+        # plt.ylabel('dq')
+        # plt.legend()
+        # plt.title(f'VBOC data, horizon {N}')
+        # plt.savefig(params.DATA_DIR + f'{nq}dof_vboc.png')
+
+        # # Create the histogram
+        # plt.figure()
+        # plt.hist(status, bins=[0, 1, 2, 3, 4, 5], edgecolor='black', align='left', rwidth=0.8)
+
+        # # Set the title and labels
+        # plt.title('Histogram of status flags')
+        # plt.xlabel('Flag')
+        # plt.ylabel('Frequency')
+
+        # # Set the x-axis ticks to be the integers from 0 to 4
+        # plt.xticks(range(5))
+
+        # # Show the plot
+        # plt.show()
+
 
     # TRAINING
     if args['training']:
         # Load the data
-        x_train = np.load(params.DATA_DIR + str(nq) + 'dof_vboc.npy')
-        beta = args['beta']
-        batch_size = args['batch_size']
+        x_data = np.load(params.DATA_DIR + str(nq) + 'dof_vboc.npy')
+        np.random.shuffle(x_data)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        nn_model = NeuralNetwork(model.nx, (model.nx - 1) * 100, 1).to(device)
+        nn_model = NeuralNetwork(model.nx, 300, 1, torch.nn.ReLU()).to(device)
         loss_fn = torch.nn.MSELoss()
-        optimizer = torch.optim.Adam(nn_model.parameters(), lr=args['learning_rate'])
-        regressor = RegressionNN(nn_model, loss_fn, optimizer, beta, batch_size)
+        optimizer = torch.optim.Adam(nn_model.parameters(), lr=params.learning_rate)
+        regressor = RegressionNN(params, nn_model, loss_fn, optimizer)
 
         # Compute outputs and inputs
-        y_train = np.linalg.norm(x_train[:, nq:], axis=1).reshape(len(x_train), 1)
-        mean = np.mean(x_train[:, :nq])
-        std = np.std(x_train[:, :nq])
-        x_train[:, :nq] = (x_train[:, :nq] - mean) / std
-        x_train[:, nq:] /= y_train
-
+        mean = np.mean(x_data[:, :nq])
+        std = np.std(x_data[:, :nq])
+        x_data[:, :nq] = (x_data[:, :nq] - mean) / std
+        y_data = np.linalg.norm(x_data[:, nq:], axis=1).reshape(len(x_data), 1)
+        for k in range(len(x_data)):
+            if y_data[k] != 0.: 
+                x_data[k, nq:] /= y_data[k] 
+        
+        x_train, y_train = x_data[:params.prob_num], y_data[:params.prob_num]
         print('Start training\n')
-        evolution = regressor.training(x_train, y_train)
+        evolution = regressor.training(x_train, y_train, args['epochs'])
         print('Training completed\n')
 
         print('Evaluate the model')
         _, rmse_train = regressor.testing(x_train, y_train)
         print('RMSE on Training data: %.5f' % rmse_train)
 
-        # Compute the test data
-        print('Generation of testing data (only x0*)')
-        q_test = np.random.uniform(model.x_min[:nq], model.x_max[:nq], size=(params.test_num, nq))
-        with Pool(params.cpu_num) as p:
-            data = p.starmap(computeDataOnBorder, [(q0, N, 1) for q0 in q_test])
-
-        x_test = np.array([i for i in data if i is not None])
-        y_test = np.linalg.norm(x_test[:, nq:], axis=1).reshape(len(x_test), 1)
-        x_test[:, :nq] = (x_test[:, :nq] - mean) / std
-        x_test[:, nq:] /= y_test
+        x_test, y_test = x_data[-params.test_num:], y_data[-params.test_num:]
         out_test, rmse_test = regressor.testing(x_test, y_test)
         print('RMSE on Test data: %.5f' % rmse_test)
 
@@ -222,25 +244,26 @@ if __name__ == '__main__':
         print(f'Maximum error wrt test data: {safety_margin:.5f}')
 
         # Save the model
-        torch.save({'mean': mean, 'std': std, 'model': nn_model.state_dict()},
-                   params.NN_DIR + 'model_' + str(nq) + 'dof.pt')
+        torch.save({'mean': mean, 'std': std, 'model': nn_model.state_dict()}, nn_filename)
 
         print('\nPlot the loss evolution')
         # Plot the loss evolution
         plt.figure()
-        plt.plot(evolution)
+        plt.grid(True, which='both')
+        plt.semilogy(evolution)
         plt.xlabel('Epochs')
-        plt.ylabel('Loss')
+        plt.ylabel('MSE Loss (LP filtered)')
         plt.title(f'Training evolution, horizon {N}')
         plt.savefig(params.DATA_DIR + f'evolution_{N}.png')
 
     # PLOT THE VIABILITY KERNEL
     if args['plot']:
-        dataset = np.load(params.DATA_DIR + str(model.nq) + 'dof_vboc.npy')
-        nn_data = torch.load(params.NN_DIR + 'model_' + str(model.nq) + 'dof.pt')
-        nn_model = NeuralNetwork(model.nx, (model.nx - 1) * 100, 1)
+        x_fixed, x_tot, sep, x_traj = fixedVelocityDir(N)
+        np.save(params.DATA_DIR + 'fixed_dir_traj.npy', x_traj)
+        nn_data = torch.load(nn_filename)
+        nn_model = NeuralNetwork(model.nx, 300, 1, torch.nn.ReLU())
         nn_model.load_state_dict(nn_data['model'])
-        plot_viability_kernel(model.nq, params, nn_model, nn_data['mean'], nn_data['std'], dataset, N)
+        plot_viability_kernel(params, model, kin_dyn_np, nn_model, nn_data['mean'], nn_data['std'], x_fixed, x_tot, sep, N)
     plt.show()
 
     elapsed_time = time.time() - start_time

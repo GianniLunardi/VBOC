@@ -2,37 +2,26 @@ import re
 import numpy as np
 from casadi import MX, vertcat
 from urdf_parser_py.urdf import URDF
-import adam
-from adam.casadi import KinDynComputations
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 
 
 class AdamModel:
-    def __init__(self, params, n_dofs=False):
+    def __init__(self, params, kin_dyn, robot_joints, nq):
         self.params = params
-        self.amodel = AcadosModel()
-        # Robot dynamics with Adam (IIT)
-        robot = URDF.from_xml_file(params.robot_urdf)
-        try:
-            n_dofs = n_dofs if n_dofs else len(robot.joints)
-            if n_dofs > len(robot.joints) or n_dofs < 1:
-                raise ValueError
-        except ValueError:
-            print(f'\nInvalid number of degrees of freedom! Must be > 1 and <= {len(robot.joints)}\n')
-            exit()
-        robot_joints = robot.joints[1:n_dofs+1] if params.urdf_name == 'z1' else robot.joints[:n_dofs]
-        joint_names = [joint.name for joint in robot_joints]
-        kin_dyn = KinDynComputations(params.robot_urdf, joint_names, robot.get_root())        
-        kin_dyn.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
-        self.mass = kin_dyn.mass_matrix_fun()       # Mass matrix
-        self.bias = kin_dyn.bias_force_fun()        # Nonlinear effects  
-        nq = len(joint_names)
 
+        self.mass = kin_dyn.mass_matrix_fun()                           # Mass matrix
+        self.bias = kin_dyn.bias_force_fun()                            # Nonlinear effects 
+        # TODO: this function must be defined for each part where collision is possible 
+        if params.obs_flag:
+            self.fk = kin_dyn.forward_kinematics_fun(params.frame_name)     # Forward kinematics
+
+        self.amodel = AcadosModel()
         self.amodel.name = params.urdf_name
         self.x = MX.sym("x", nq * 2)
         self.x_dot = MX.sym("x_dot", nq * 2)
         self.u = MX.sym("u", nq)
         self.p = MX.sym("p", nq)
+        # Double-integrator 
         self.f_disc = vertcat(
             self.x[:nq] + params.dt * self.x[nq:] + 0.5 * params.dt**2 * self.u,
             self.x[nq:] + params.dt * self.u
@@ -61,17 +50,16 @@ class AdamModel:
         self.x_max = np.hstack([joint_upper, joint_velocity])
         self.eps = params.state_tol
 
-        # Forward kinematics
-        self.fk = kin_dyn.forward_kinematics_fun('link2')
-
-    def insideStateConstraints(self, x):
-        return np.all(np.logical_and(x >= self.x_min + self.eps, x <= self.x_max - self.eps))
-
-    def insideControlConstraints(self, u):
-        return np.all(np.logical_and(u >= self.u_min, u <= self.u_max))
-
-    def insideRunningConstraints(self, x, u):
-        return self.insideStateConstraints(x) and self.insideControlConstraints(u)
+        # Cartesian constraint
+        if params.urdf_name == 'double_pendulum':
+            self.t_loc = np.array([0., 0., 0.2])
+            self.z_bounds = np.array([-0.25, 1e6])
+        elif params.urdf_name == 'z1':
+            self.t_loc = np.array([0.035, 0., 0.])
+            self.z_bounds = np.array([0., 1e6])
+            self.x_bounds = np.array([-0.5, 1e6])
+        else:
+            self.t_loc = np.array([0., 0., 0.2]) 
 
     def checkPositionBounds(self, q):
         return np.logical_or(np.any(q < self.x_min[:self.nq] + self.eps), np.any(q > self.x_max[:self.nq] - self.eps))
@@ -115,35 +103,45 @@ class AbstractController:
         self.ocp.constraints.ubx_e = self.model.x_max
         self.ocp.constraints.idxbx_e = np.arange(self.model.nx)
 
-        # Nonlinear constraint --> dynamics 
-        #                      --> table and/or wall 
-        #                      --> obstacle (sphere)
+        # Nonlinear constraint 
+        nl_constraints = []
+        nl_lb = []
+        nl_ub = []
         H_b = np.eye(4)     # Base roto-translation matrix   
-        T_ee = self.model.fk(H_b, self.model.x[:self.model.nq]) 
-        t_loc = np.array([0., 0., 0.2])
-        T_ee[:3, 3] += T_ee[:3, :3] @ t_loc
+        
+        # --> dynamics
         computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
                           self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
-        
-        # self.model.amodel.con_h_expr_0 = computed_torque
-        # self.model.amodel.con_h_expr = computed_torque
+        nl_constraints.append(computed_torque)
+        nl_lb.append(self.model.tau_min)
+        nl_ub.append(self.model.tau_max)
 
-        # self.ocp.constraints.lh_0 = self.model.tau_min
-        # self.ocp.constraints.uh_0 = self.model.tau_max
-        # self.ocp.constraints.lh = self.model.tau_min
-        # self.ocp.constraints.uh = self.model.tau_max
-        
-        self.model.amodel.con_h_expr_0 = vertcat(computed_torque, T_ee[2, 3])   
-        self.model.amodel.con_h_expr = vertcat(computed_torque, T_ee[2, 3])
-        self.model.amodel.con_h_expr_e = T_ee[2, 3]
+        # --> collision
+        if self.params.obs_flag:
+            T_ee = self.model.fk(H_b, self.model.x[:self.model.nq]) 
+            T_ee[:3, 3] += T_ee[:3, :3] @ self.model.t_loc
+            nl_constraints.append(T_ee[2, 3])
 
-        z_bounds = np.array([-0.25, 1e6])
-        self.ocp.constraints.lh_0 = np.hstack([self.model.tau_min, z_bounds[0]])
-        self.ocp.constraints.uh_0 = np.hstack([self.model.tau_max, z_bounds[1]])
-        self.ocp.constraints.lh = np.hstack([self.model.tau_min, z_bounds[0]])
-        self.ocp.constraints.uh = np.hstack([self.model.tau_max, z_bounds[1]])
-        self.ocp.constraints.lh_e = np.array([z_bounds[0]])
-        self.ocp.constraints.uh_e = np.array([z_bounds[1]])
+            nl_lb.append(self.model.z_bounds[0])
+            nl_ub.append(self.model.z_bounds[1])
+
+            # if self.params.urdf_name == 'z1':
+            #     nl_constraints.append(T_ee[0, 3])
+
+            #     nl_lb.append(self.model.x_bounds[0])
+            #     nl_ub.append(self.model.x_bounds[1])
+        
+        self.model.amodel.con_h_expr_0 = vertcat(*nl_constraints)   
+        self.model.amodel.con_h_expr = vertcat(*nl_constraints)
+        self.model.amodel.con_h_expr_e = vertcat(*nl_constraints[1:])
+
+        
+        self.ocp.constraints.lh_0 = np.hstack(nl_lb)
+        self.ocp.constraints.uh_0 = np.hstack(nl_ub)
+        self.ocp.constraints.lh = np.hstack(nl_lb)
+        self.ocp.constraints.uh = np.hstack(nl_ub)
+        self.ocp.constraints.lh_e = np.array(nl_lb[1:])
+        self.ocp.constraints.uh_e = np.array(nl_ub[1:])
             
         # Additional constraints
         self.addConstraint()
@@ -158,12 +156,12 @@ class AbstractController:
         self.ocp.solver_options.nlp_solver_max_iter = self.params.nlp_max_iter
         self.ocp.solver_options.qp_solver_iter_max = self.params.qp_max_iter
         self.ocp.solver_options.globalization = self.params.globalization
-        self.ocp.solver_options.qp_solver_tol_stat = self.params.qp_tol_stat
         self.ocp.solver_options.nlp_solver_tol_stat = self.params.nlp_tol_stat
         #   IMPORTANT
         # NLP solver tol stat is the tolerance on the stationary condition
         # Asia used a higher value than default (1e-6) to obtain a higher number of solutions
         # maybe try to find a better trade-off btw 1e-3 and 1e-6
+        # TODO: try to maintain default 1e-6
         #########################
         self.ocp.solver_options.alpha_reduction = self.params.alpha_reduction
         self.ocp.solver_options.alpha_min = self.params.alpha_min

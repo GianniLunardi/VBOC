@@ -11,7 +11,6 @@ alpha: 2                  # safety margin
 solver_mode: 'BALANCE'    # HPIPM mode, can be --> 'BALANCE', 'ROBUST', 'SPEED', 'SPEED_ABS'
 nlp_max_iter: 1000
 qp_max_iter: 100
-qp_tol_stat: 1e-3         # QP solver tolerance on stationary residuals
 nlp_tol_stat: 1e-3        # NLP solver tolerance on stationary residuals
 alpha_reduction: 0.3
 alpha_min: 1e-2
@@ -20,3 +19,9 @@ levenberg_marquardt: 1e-5
 state_tol: 1e-2           # state tolerance
 conv_tol: 1e-3            # convergence tolerance for the task
 cost_tol: 1e-3            # Tolerance for the cost
+
+learning_rate: 1e-3       # learning rate
+batch_size: 4096          # batch size
+beta: 0.95                # low pass filter coefficient
+
+obs_flag: false           # activation of Cartesian constraints

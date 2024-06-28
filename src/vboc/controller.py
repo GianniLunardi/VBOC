@@ -84,5 +84,5 @@ class ViabilityController(AbstractController):
                 N += n
                 self.resetHorizon(N)
             else:
-                return None, None, None
-        return x_sol, u_sol, N
+                return None, None, None, status
+        return x_sol, u_sol, N, status

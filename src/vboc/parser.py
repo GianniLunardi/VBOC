@@ -18,14 +18,8 @@ def parse_args():
                         help='Train the neural network model that approximates the viability kernel')
     parser.add_argument('-p', '--plot', action='store_true',
                         help='Plot the approximated viability kernel')
-    parser.add_argument('-m', '--memmo', action='store_true',
-                        help='Learn a policy that drive to equilibrium using VBOC data')
-    parser.add_argument('--learning_rate', type=float, default=1e-3,
-                        help='Learning rate for the neural network')
-    parser.add_argument('--batch_size', type=int, default=4096,
-                        help='Batch size for the neural network')
-    parser.add_argument('--beta', type=float, default=0.95,
-                        help='Low-pass filter for the loss function')
+    parser.add_argument('--epochs', type=int, default=1000,
+                        help='Number of epochs for training the neural network')
     return vars(parser.parse_args())
 
 
@@ -62,13 +56,26 @@ class Parameters:
         self.solver_mode = parameters['solver_mode']
         self.nlp_max_iter = int(parameters['nlp_max_iter'])
         self.qp_max_iter = int(parameters['qp_max_iter'])
-        self.qp_tol_stat = float(parameters['qp_tol_stat'])
         self.nlp_tol_stat = float(parameters['nlp_tol_stat'])
         self.alpha_reduction = float(parameters['alpha_reduction'])
         self.alpha_min = float(parameters['alpha_min'])
         self.levenberg_marquardt = float(parameters['levenberg_marquardt'])
 
         self.state_tol = float(parameters['state_tol'])
-        self.conv_tol = float(parameters['conv_tol'])
+        # self.conv_tol = float(parameters['conv_tol'])
         self.cost_tol = float(parameters['cost_tol'])
         self.globalization = 'MERIT_BACKTRACKING'
+
+        self.learning_rate = float(parameters['learning_rate'])
+        self.batch_size = int(parameters['batch_size'])
+        self.beta = float(parameters['beta'])
+
+        # For cartesian constraint
+        self.obs_flag = bool(parameters['obs_flag'])
+        if urdf_name == 'double_pendulum':
+            frame_name = 'link2' 
+        elif urdf_name == 'z1':
+            frame_name = 'gripperMover'
+        else:
+            frame_name = 'none'
+        self.frame_name = frame_name       #  TODO: dependence on the robot

@@ -92,6 +92,7 @@ if __name__ == '__main__':
         print('\nSystem not available! Available: ', available_systems, '\n')
         exit()
     params = Parameters(args['system']) 
+    params.build = args['build']
 
     # Load the model of the robot
     robot = URDF.from_xml_file(params.robot_urdf)
@@ -110,6 +111,20 @@ if __name__ == '__main__':
     kin_dyn_cs = KinDynCasadi(params.robot_urdf, joint_names, robot.get_root())
     kin_dyn_np.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
     kin_dyn_cs.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
+
+    if params.payload:
+        # Add a payload to the robot --> cylinder m = 3 kg, r = 0.02 m, h = 0.1 m
+        # TODO: this is only for a cylinder on z1 gripper, define for general payload/robot 
+        m = 3.
+        r = 0.02
+        h = 0.1
+        Ixx = 1 / 12 * m * (3 * r**2 + h**2)
+        Izz = 1 / 2 * m * r**2
+        
+        kin_dyn_cs.rbdalgos.model.links[params.frame_name].inertial.mass += m
+        kin_dyn_cs.rbdalgos.model.links[params.frame_name].inertial.inertia.ixx += Ixx
+        kin_dyn_cs.rbdalgos.model.links[params.frame_name].inertial.inertia.iyy += Ixx
+        kin_dyn_cs.rbdalgos.model.links[params.frame_name].inertial.inertia.izz += Izz
 
     model = AdamModel(params, kin_dyn_cs, robot_joints, n_dofs)
     controller = ViabilityController(model)
@@ -167,12 +182,6 @@ if __name__ == '__main__':
         x_data_temp, x_traj_temp, status = zip(*res)
         x_data = np.vstack([i for i in x_data_temp if i is not None])
         x_traj = np.asarray([i for i in x_traj_temp if i is not None])
-        print(x_traj.shape)
-
-        # Velocity Norm of last state
-        # print(np.linalg.norm(x_traj[:, nq:], axis=1))
-        # for i in range(len(x_traj)):
-        #     print('State: ', x_traj[i, -1, :], ',Vel norm:', np.linalg.norm(x_traj[i, -1, nq:]) )
     
         solved = len(x_data)
         print('Solved/numb of problems: %.3f' % (solved / (params.prob_num + params.test_num)))
@@ -180,30 +189,37 @@ if __name__ == '__main__':
         np.save(params.DATA_DIR + str(nq) + 'dof_vboc', x_data)
         np.save(params.DATA_DIR + 'traj_vboc', x_traj)
 
-        # plt.figure()
-        # plt.grid()
-        # plt.scatter(x_data[:, 0], x_data[:, 2], color='darkorange', s=5, label='q1')
-        # plt.scatter(x_data[:, 1], x_data[:, 3], color='darkgreen', s=5, label='q2')
-        # plt.xlabel('q')
-        # plt.ylabel('dq')
-        # plt.legend()
-        # plt.title(f'VBOC data, horizon {N}')
-        # plt.savefig(params.DATA_DIR + f'{nq}dof_vboc.png')
+        # # Plot trajectory solution
+        # colors = np.linspace(0, 1, horizon)
+        # # clear the plots directory
+        # for file in os.listdir(params.DATA_DIR + '/plots'):
+        #     os.remove(params.DATA_DIR + '/plots/' + file)
+        # for k in range(len(x_traj)):
+        #     fig, ax = plt.subplots(2, 2)
+        #     ax = ax.reshape(-1)
+        #     for i in range(nq):
+        #         ax[i].grid(True)
+        #         ax[i].scatter(x_traj[k][:, i], x_traj[k][:, nq + i], c=colors, cmap='coolwarm')
+        #         ax[i].set_xlim([model.x_min[i], model.x_max[i]])
+        #         ax[i].set_ylim([model.x_min[nq + i], model.x_max[nq + i]])
+        #         ax[i].set_title(f'Joint {i + 1}')
+        #         ax[i].set_xlabel(f'q_{i + 1}')
+        #         ax[i].set_ylabel(f'dq_{i + 1}')
+        #     plt.suptitle(f'Trajectory {k + 1}')
+        #     plt.tight_layout()
+        #     plt.savefig(params.DATA_DIR + f'/plots/traj_{k + 1}.png')
 
-        # # Create the histogram
-        # plt.figure()
-        # plt.hist(status, bins=[0, 1, 2, 3, 4, 5], edgecolor='black', align='left', rwidth=0.8)
+        #     plt.close(fig)
 
-        # # Set the title and labels
-        # plt.title('Histogram of status flags')
-        # plt.xlabel('Flag')
-        # plt.ylabel('Frequency')
+        # histogram of status
+        plt.figure()
+        plt.hist(status, bins=[0, 1, 2, 3, 4, 5], edgecolor='black', align='left', rwidth=0.8)
+        plt.title('Histogram of status flags')
+        plt.xlabel('Flag')
+        plt.ylabel('Frequency')
+        plt.xticks(range(5))
 
-        # # Set the x-axis ticks to be the integers from 0 to 4
-        # plt.xticks(range(5))
-
-        # # Show the plot
-        # plt.show()
+        plt.show()
 
 
     # TRAINING

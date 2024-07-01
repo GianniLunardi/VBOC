@@ -10,6 +10,8 @@ def parse_args():
                         help='Systems to test. Available: pendulum, double_pendulum, ur5, z1')
     parser.add_argument('--dofs', type=int, default=False, nargs='?',
                         help='Number of desired degrees of freedom of the system')
+    parser.add_argument('-b', '--build', action='store_true',
+                        help='Build the code of the embedded controller')
     parser.add_argument('-v', '--vboc', action='store_true',
                         help='Compute data on border of the viability kernel')
     parser.add_argument('--horizon', type=int, default=100,
@@ -46,7 +48,7 @@ class Parameters:
         self.test_num = int(parameters['test_num'])
         self.n_steps = int(parameters['n_steps'])
         self.cpu_num = int(parameters['cpu_num'])
-        self.regenerate = bool(parameters['regenerate'])
+        self.build = False
         
         self.T = float(parameters['T'])
         self.dt = float(parameters['dt'])
@@ -79,3 +81,6 @@ class Parameters:
         else:
             frame_name = 'none'
         self.frame_name = frame_name       #  TODO: dependence on the robot
+
+        # Payload 
+        self.payload = bool(parameters['payload'])

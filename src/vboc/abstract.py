@@ -125,11 +125,6 @@ class AbstractController:
             nl_lb.append(self.model.z_bounds[0])
             nl_ub.append(self.model.z_bounds[1])
 
-            # if self.params.urdf_name == 'z1':
-            #     nl_constraints.append(T_ee[0, 3])
-
-            #     nl_lb.append(self.model.x_bounds[0])
-            #     nl_ub.append(self.model.x_bounds[1])
         
         self.model.amodel.con_h_expr_0 = vertcat(*nl_constraints)   
         self.model.amodel.con_h_expr = vertcat(*nl_constraints)
@@ -156,13 +151,6 @@ class AbstractController:
         self.ocp.solver_options.nlp_solver_max_iter = self.params.nlp_max_iter
         self.ocp.solver_options.qp_solver_iter_max = self.params.qp_max_iter
         self.ocp.solver_options.globalization = self.params.globalization
-        self.ocp.solver_options.nlp_solver_tol_stat = self.params.nlp_tol_stat
-        #   IMPORTANT
-        # NLP solver tol stat is the tolerance on the stationary condition
-        # Asia used a higher value than default (1e-6) to obtain a higher number of solutions
-        # maybe try to find a better trade-off btw 1e-3 and 1e-6
-        # TODO: try to maintain default 1e-6
-        #########################
         self.ocp.solver_options.alpha_reduction = self.params.alpha_reduction
         self.ocp.solver_options.alpha_min = self.params.alpha_min
         self.ocp.solver_options.levenberg_marquardt = self.params.levenberg_marquardt
@@ -170,7 +158,7 @@ class AbstractController:
         # Generate OCP solver
         gen_name = self.params.GEN_DIR + 'ocp_' + self.ocp_name + '_' + self.model.amodel.name
         self.ocp.code_export_directory = gen_name
-        self.ocp_solver = AcadosOcpSolver(self.ocp, json_file=gen_name + '.json', build=self.params.regenerate)
+        self.ocp_solver = AcadosOcpSolver(self.ocp, json_file=gen_name + '.json', build=self.params.build)
 
         # Storage
         self.x_guess = np.zeros((self.N, self.model.nx))

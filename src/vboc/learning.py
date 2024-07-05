@@ -16,8 +16,8 @@ class NeuralNetwork(nn.Module):
             activation,
             nn.Linear(hidden_size, hidden_size),
             activation,
-            # nn.Linear(hidden_size, hidden_size),
-            # activation,
+            nn.Linear(hidden_size, hidden_size),
+            activation,
             nn.Linear(hidden_size, output_size),
             activation,
         )
@@ -90,7 +90,7 @@ class RegressionNN:
         return y_pred, np.sqrt(np.mean((y_pred - y_test)**2))
 
 
-def plot_viability_kernel(params, model, kin_dyn, nn_model, mean, std, dataset, x_tot, sep, horizon=100, grid=1e-2):
+def plot_viability_kernel(params, model, kin_dyn, nn_model, mean, std, dataset, horizon=100, grid=1e-2):
     #x_fixed, x_tot, sep, N
     # Create the grid
     nq = model.nq
@@ -131,9 +131,6 @@ def plot_viability_kernel(params, model, kin_dyn, nn_model, mean, std, dataset, 
             # Plot of the viable samples
             plt.scatter(dataset[i*n_pts:(i+1)*n_pts, i], dataset[i*n_pts:(i+1)*n_pts, nq + i], 
                         color='darkgreen', s=12)
-            # Plot of all the feasible initial conditions
-            plt.scatter(x_tot[i*int(sep[i]):(i+1)*int(sep[i]), i], x_tot[i*int(sep[i]):(i+1)*int(sep[i]), nq + i], 
-                        color='darkorange', s=10)
 
             # Remove the joint positions s.t. robot collides with obstacles 
             if params.obs_flag:
@@ -141,11 +138,13 @@ def plot_viability_kernel(params, model, kin_dyn, nn_model, mean, std, dataset, 
                 for j in range(len(x)):
                     T_ee = kin_dyn.forward_kinematics(params.frame_name, H_b, x[j, :nq])
                     t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ t_loc
+                    d_ee = t_glob - model.t_ball
                     # if t_glob[2] < -0.25:
-                    if t_glob[2] < 0.:
+                    if t_glob[2] <= model.z_bounds[0] or np.dot(d_ee, d_ee) <= model.ball_bounds[0]:
                         pts = np.append(pts, x[j, i])
-                plt.axvline(np.min(pts), color='blueviolet', linewidth=1.5)
-                plt.axvline(np.max(pts), color='black', linewidth=1.5)
+                if len(pts) > 0:
+                    plt.axvline(np.min(pts), color='blueviolet', linewidth=1.5)
+                    plt.axvline(np.max(pts), color='black', linewidth=1.5)
 
             plt.xlim([model.x_min[i], model.x_max[i]])
             plt.ylim([model.x_min[i + nq], model.x_max[i + nq]])

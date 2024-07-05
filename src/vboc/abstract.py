@@ -1,14 +1,13 @@
 import re
 import numpy as np
-from casadi import MX, vertcat
-from urdf_parser_py.urdf import URDF
+from casadi import MX, vertcat, dot
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 
 
 class AdamModel:
     def __init__(self, params, kin_dyn, robot_joints, nq):
         self.params = params
-
+        self.H_b = np.eye(4)                                            # Base roto-translation matrix
         self.mass = kin_dyn.mass_matrix_fun()                           # Mass matrix
         self.bias = kin_dyn.bias_force_fun()                            # Nonlinear effects 
         # TODO: this function must be defined for each part where collision is possible 
@@ -38,11 +37,15 @@ class AdamModel:
         self.nq = nq
         self.nv = nq
 
+        self.tau = self.mass(self.H_b, self.x[:nq])[6:, 6:] @ self.u + \
+                   self.bias(self.H_b, self.x[:nq], np.zeros(6), self.x[nq:])[6:] 
+
         # Joint limits
         joint_lower = np.array([joint.limit.lower for joint in robot_joints])
         joint_upper = np.array([joint.limit.upper for joint in robot_joints])
         joint_velocity = np.array([joint.limit.velocity for joint in robot_joints])
-        joint_effort = np.array([joint.limit.effort for joint in robot_joints]) 
+        # joint_effort = np.array([joint.limit.effort for joint in robot_joints]) 
+        joint_effort = np.array([2., 23., 10., 4.])
 
         self.tau_min = - joint_effort
         self.tau_max = joint_effort
@@ -55,9 +58,16 @@ class AdamModel:
             self.t_loc = np.array([0., 0., 0.2])
             self.z_bounds = np.array([-0.25, 1e6])
         elif params.urdf_name == 'z1':
-            self.t_loc = np.array([0.035, 0., 0.])
-            self.z_bounds = np.array([0., 1e6])
-            self.x_bounds = np.array([-0.5, 1e6])
+            # Consider a sphere that contain the EE
+            r_ee = 0.075
+            self.t_loc = np.array([0.035, 0., 0.])  
+            # Obstacles
+            # 1 --> table
+            self.z_bounds = np.array([r_ee, 1e6])
+            # 2 --> ball 
+            r_ball = 0.12
+            self.t_ball = np.array([0.4, 0., r_ball])
+            self.ball_bounds = np.array([(r_ee + r_ball)**2, 1e6])
         else:
             self.t_loc = np.array([0., 0., 0.2]) 
 
@@ -106,24 +116,27 @@ class AbstractController:
         # Nonlinear constraint 
         nl_constraints = []
         nl_lb = []
-        nl_ub = []
-        H_b = np.eye(4)     # Base roto-translation matrix   
+        nl_ub = []   
         
         # --> dynamics
-        computed_torque = self.model.mass(H_b, self.model.x[:self.model.nq])[6:, 6:] @ self.model.u + \
-                          self.model.bias(H_b, self.model.x[:self.model.nq], np.zeros(6), self.model.x[self.model.nq:])[6:]
-        nl_constraints.append(computed_torque)
+        
+        nl_constraints.append(self.model.tau)
         nl_lb.append(self.model.tau_min)
         nl_ub.append(self.model.tau_max)
 
         # --> collision
         if self.params.obs_flag:
-            T_ee = self.model.fk(H_b, self.model.x[:self.model.nq]) 
+            T_ee = self.model.fk(self.model.H_b, self.model.x[:self.model.nq]) 
             T_ee[:3, 3] += T_ee[:3, :3] @ self.model.t_loc
+            # 1) table --> z_ee > r_ee
             nl_constraints.append(T_ee[2, 3])
-
             nl_lb.append(self.model.z_bounds[0])
             nl_ub.append(self.model.z_bounds[1])
+            # 2) ball --> d(p_ee, p_b)^2 > (r_ee + r_ball)^2
+            d = T_ee[:3, 3] - self.model.t_ball
+            nl_constraints.append(dot(d, d))
+            nl_lb.append(self.model.ball_bounds[0])
+            nl_ub.append(self.model.ball_bounds[1])
 
         
         self.model.amodel.con_h_expr_0 = vertcat(*nl_constraints)   

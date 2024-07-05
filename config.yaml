@@ -1,5 +1,5 @@
-prob_num: 100000          # number of OCP to create training dataset
-test_num: 1000            #   "    "   "  "    "    test dataset
+prob_num: 150000          # number of OCP to create training dataset
+test_num: 15000           #   "    "   "  "    "    test dataset
 n_steps: 200              # number of time steps in each test
 cpu_num: 24
 
@@ -24,4 +24,4 @@ batch_size: 4096          # batch size
 beta: 0.95                # low pass filter coefficient
 
 obs_flag: false           # activation of Cartesian constraints
-payload: true            # add payload on end-effector
+payload: false            # add payload on end-effector

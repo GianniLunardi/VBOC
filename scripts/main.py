@@ -31,20 +31,18 @@ def computeDataOnBorder(q, N_guess):
     controller.setGuess(x_guess, u_guess)
 
     # Solve the OCP
-    x_star, _, _, status = controller.solveVBOC(q, d, N_guess, n=N_increment, repeat=50)
+    x_star, u_star, _, status = controller.solveVBOC(q, d, N_guess, n=N_increment, repeat=50)
     if x_star is None:
-        return None, None, status
+        return None, None, None, status
     else:
-        return x_star[0], x_star, status
+        return x_star[0], x_star, u_star, status
     
 
 def fixedVelocityDir(N_guess, n_pts=200):
     """ Compute data on section of the viability kernel"""
     controller.resetHorizon(N_guess)
     x_sec = np.empty((0, model.nx))
-    x_tot = np.empty_like(x_sec)
     x_traj = []
-    sep = np.zeros(nq)
     for i in range(nq):
         j = 0
         jj = 0
@@ -55,9 +53,9 @@ def fixedVelocityDir(N_guess, n_pts=200):
             if params.obs_flag:
                 T_ee = kin_dyn_np.forward_kinematics(params.frame_name, np.eye(4), q_try)
                 t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ model.t_loc
-                if t_glob[2] <= model.z_bounds[0]:
+                d_ee = t_glob - model.t_ball
+                if t_glob[2] <= model.z_bounds[0] or np.dot(d_ee, d_ee) <= model.ball_bounds[0]:
                     continue
-                x_tot = np.vstack([x_tot, np.hstack([q_try, np.zeros(model.nv)])])
                 jj += 1
 
             x_guess = np.zeros((N_guess, model.nx))
@@ -73,8 +71,7 @@ def fixedVelocityDir(N_guess, n_pts=200):
                 x_sec = np.vstack([x_sec, x_star[0]])
                 j += 1
                 x_traj.append(x_star)
-        sep[i] = jj
-    return x_sec, x_tot, sep, x_traj
+    return x_sec, x_traj
                 
 
 
@@ -115,7 +112,8 @@ if __name__ == '__main__':
     if params.payload:
         # Add a payload to the robot --> cylinder m = 3 kg, r = 0.02 m, h = 0.1 m
         # TODO: this is only for a cylinder on z1 gripper, define for general payload/robot 
-        m = 3.
+
+        m = 1.
         r = 0.02
         h = 0.1
         Ixx = 1 / 12 * m * (3 * r**2 + h**2)
@@ -126,6 +124,7 @@ if __name__ == '__main__':
         kin_dyn_cs.rbdalgos.model.links[params.frame_name].inertial.inertia.iyy += Ixx
         kin_dyn_cs.rbdalgos.model.links[params.frame_name].inertial.inertia.izz += Izz
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = AdamModel(params, kin_dyn_cs, robot_joints, n_dofs)
     controller = ViabilityController(model)
     nq = model.nq
@@ -163,8 +162,9 @@ if __name__ == '__main__':
                 q_try = np.random.uniform(model.x_min[:nq], model.x_max[:nq])
                 T_ee = kin_dyn_np.forward_kinematics(params.frame_name, H_b, q_try)
                 t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ model.t_loc 
+                d_ee = t_glob - model.t_ball
                 # if t_glob[2] > -0.25:
-                if t_glob[2] > model.z_bounds[0]: #and t_glob[0] > model.x_bounds[0]:
+                if t_glob[2] > model.z_bounds[0] and np.dot(d_ee, d_ee) > model.ball_bounds[0]:
                     q_init = np.vstack([q_init, q_try])
                     i += 1
                     progress_bar.update(1)
@@ -179,9 +179,10 @@ if __name__ == '__main__':
             # inputs --> (initial random configuration, horizon)
             res = p.starmap(computeDataOnBorder, [(q0, N) for q0 in q_init])
         
-        x_data_temp, x_traj_temp, status = zip(*res)
+        x_data_temp, x_t, u_t, status = zip(*res)
         x_data = np.vstack([i for i in x_data_temp if i is not None])
-        x_traj = np.asarray([i for i in x_traj_temp if i is not None])
+        x_traj = np.asarray([i for i in x_t if i is not None])
+        u_traj = np.asarray([i for i in u_t if i is not None])
     
         solved = len(x_data)
         print('Solved/numb of problems: %.3f' % (solved / (params.prob_num + params.test_num)))
@@ -189,27 +190,67 @@ if __name__ == '__main__':
         np.save(params.DATA_DIR + str(nq) + 'dof_vboc', x_data)
         np.save(params.DATA_DIR + 'traj_vboc', x_traj)
 
-        # # Plot trajectory solution
-        # colors = np.linspace(0, 1, horizon)
-        # # clear the plots directory
-        # for file in os.listdir(params.DATA_DIR + '/plots'):
-        #     os.remove(params.DATA_DIR + '/plots/' + file)
-        # for k in range(len(x_traj)):
-        #     fig, ax = plt.subplots(2, 2)
-        #     ax = ax.reshape(-1)
-        #     for i in range(nq):
-        #         ax[i].grid(True)
-        #         ax[i].scatter(x_traj[k][:, i], x_traj[k][:, nq + i], c=colors, cmap='coolwarm')
-        #         ax[i].set_xlim([model.x_min[i], model.x_max[i]])
-        #         ax[i].set_ylim([model.x_min[nq + i], model.x_max[nq + i]])
-        #         ax[i].set_title(f'Joint {i + 1}')
-        #         ax[i].set_xlabel(f'q_{i + 1}')
-        #         ax[i].set_ylabel(f'dq_{i + 1}')
-        #     plt.suptitle(f'Trajectory {k + 1}')
-        #     plt.tight_layout()
-        #     plt.savefig(params.DATA_DIR + f'/plots/traj_{k + 1}.png')
+        # Plot trajectory solution
+        PLOTSSS = 0
 
-        #     plt.close(fig)
+        if PLOTSSS:
+            colors = np.linspace(0, 1, horizon)
+            t = np.linspace(0, horizon * params.dt, horizon)
+            def computed_torque(x, u):
+                tau = np.zeros((len(x), nq))
+                for i in range(len(x)):
+                    tau[i] = kin_dyn_np.mass_matrix(H_b, x[i, :nq])[6:, 6:] @ u[i] + \
+                            kin_dyn_np.bias_force(H_b, x[i, :nq], np.zeros(6), x[i, nq:])[6:]
+                return tau
+            # clear the plots directory
+            for file in os.listdir(params.DATA_DIR + '/plots'):
+                os.remove(params.DATA_DIR + '/plots/' + file)
+            for k in range(len(x_traj)):
+                fig, ax = plt.subplots(2, 2)
+                ax = ax.reshape(-1)
+                for i in range(nq):
+                    ax[i].grid(True)
+                    ax[i].scatter(x_traj[k][:, i], x_traj[k][:, nq + i], c=colors, cmap='coolwarm')
+                    ax[i].set_xlim([model.x_min[i], model.x_max[i]])
+                    ax[i].set_ylim([model.x_min[nq + i], model.x_max[nq + i]])
+                    ax[i].set_title(f'Joint {i + 1}')
+                    ax[i].set_xlabel(f'q_{i + 1}')
+                    ax[i].set_ylabel(f'dq_{i + 1}')
+                plt.suptitle(f'Trajectory {k + 1}')
+                plt.tight_layout()
+                plt.savefig(params.DATA_DIR + f'/plots/traj_{k + 1}.png')
+                plt.close(fig)
+
+                fig, ax = plt.subplots(2, 2)
+                ax = ax.reshape(-1)
+                for i in range(nq):
+                    ax[i].grid(True)
+                    ax[i].plot(t, x_traj[k][:, nq + i], label=f'v_{i + 1}')
+                    ax[i].plot(t, u_traj[k][:, i], label=f'a_{i + 1}')
+                    ax[i].axhline(model.x_min[nq + i], color='b', linestyle='--')
+                    ax[i].axhline(model.x_max[nq + i], color='b', linestyle='--')
+                    ax[i].set_xlabel('Time [s]')
+                    ax[i].set_ylabel('Velocity [rad/s]')
+                    # ax[i].set_ylim([model.x_min[nq + i], model.x_max[nq + i]])
+                    ax[i].legend()
+                plt.suptitle(f'Trajectory {k + 1}')
+                plt.tight_layout()
+                plt.savefig(params.DATA_DIR + f'/plots/vel_{k + 1}.png')
+                plt.close(fig)
+
+                fig, ax = plt.subplots(2, 2)
+                ax = ax.reshape(-1)
+                for i in range(nq):
+                    ax[i].grid(True)
+                    ax[i].plot(t, computed_torque(x_traj[k], u_traj[k])[:, i], label=f'tau_{i + 1}')
+                    ax[i].set_xlabel('Time [s]')
+                    ax[i].set_ylabel('Torque [Nm]')
+                    ax[i].set_ylim([model.tau_min[i], model.tau_max[i]])
+                    ax[i].legend()
+                plt.suptitle(f'Trajectory {k + 1}')
+                plt.tight_layout()
+                plt.savefig(params.DATA_DIR + f'/plots/torque_{k + 1}.png')
+                plt.close(fig)
 
         # histogram of status
         plt.figure()
@@ -219,15 +260,11 @@ if __name__ == '__main__':
         plt.ylabel('Frequency')
         plt.xticks(range(5))
 
-        plt.show()
-
-
     # TRAINING
     if args['training']:
         # Load the data
         x_data = np.load(params.DATA_DIR + str(nq) + 'dof_vboc.npy')
         np.random.shuffle(x_data)
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         nn_model = NeuralNetwork(model.nx, 300, 1, torch.nn.ReLU()).to(device)
         loss_fn = torch.nn.MSELoss()
         optimizer = torch.optim.Adam(nn_model.parameters(), lr=params.learning_rate)
@@ -274,12 +311,24 @@ if __name__ == '__main__':
 
     # PLOT THE VIABILITY KERNEL
     if args['plot']:
-        x_fixed, x_tot, sep, x_traj = fixedVelocityDir(N)
-        np.save(params.DATA_DIR + 'fixed_dir_traj.npy', x_traj)
         nn_data = torch.load(nn_filename)
         nn_model = NeuralNetwork(model.nx, 300, 1, torch.nn.ReLU())
         nn_model.load_state_dict(nn_data['model'])
-        plot_viability_kernel(params, model, kin_dyn_np, nn_model, nn_data['mean'], nn_data['std'], x_fixed, x_tot, sep, N)
+
+        x_fixed, x_traj = fixedVelocityDir(N)
+        np.save(params.DATA_DIR + 'fixed_dir_traj.npy', x_traj)
+
+        x_f_test = np.empty_like(x_fixed)
+        x_f_test[:, :nq] = (x_fixed[:, :nq] - nn_data['mean']) / nn_data['std']
+        y_f_test = np.linalg.norm(x_fixed[:, nq:], axis=1).reshape(len(x_fixed), 1)
+        x_f_test[:, nq:] = x_fixed[:, nq:] / y_f_test
+        out_f_test = np.empty_like(y_f_test)
+        with torch.no_grad():
+            for i in range(len(x_f_test)):
+                out_f_test[i] = nn_model(torch.Tensor(x_f_test[i])).numpy()
+        print(f'Safety margin: {np.amax((out_f_test - y_f_test) / y_f_test):.5f}')
+
+        plot_viability_kernel(params, model, kin_dyn_np, nn_model, nn_data['mean'], nn_data['std'], x_fixed, N)
     plt.show()
 
     elapsed_time = time.time() - start_time

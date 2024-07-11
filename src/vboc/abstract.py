@@ -45,7 +45,7 @@ class AdamModel:
         joint_upper = np.array([joint.limit.upper for joint in robot_joints])
         joint_velocity = np.array([joint.limit.velocity for joint in robot_joints])
         # joint_effort = np.array([joint.limit.effort for joint in robot_joints]) 
-        joint_effort = np.array([2., 23., 10., 4.])
+        joint_effort = np.array([2., 31., 14., 6.]) if params.payload else np.array([2., 23., 10., 4.])
 
         self.tau_min = - joint_effort
         self.tau_max = joint_effort

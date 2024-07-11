@@ -1,5 +1,4 @@
-prob_num: 150000          # number of OCP to create training dataset
-test_num: 15000           #   "    "   "  "    "    test dataset
+prob_num: 150000          # number of OCP to create dataset
 n_steps: 200              # number of time steps in each test
 cpu_num: 24
 
@@ -22,6 +21,8 @@ cost_tol: 1e-3            # Tolerance for the cost
 learning_rate: 1e-3       # learning rate
 batch_size: 4096          # batch size
 beta: 0.95                # low pass filter coefficient
+train_ratio: 0.7          # training dataset % size
+val_ratio: 0.2            # validation dataset % size
 
 obs_flag: false           # activation of Cartesian constraints
 payload: false            # add payload on end-effector

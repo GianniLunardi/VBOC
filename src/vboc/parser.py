@@ -45,7 +45,6 @@ class Parameters:
         parameters = yaml.load(open(self.ROOT_DIR + '/config.yaml'), Loader=yaml.FullLoader)
 
         self.prob_num = int(parameters['prob_num'])
-        self.test_num = int(parameters['test_num'])
         self.n_steps = int(parameters['n_steps'])
         self.cpu_num = int(parameters['cpu_num'])
         self.build = False
@@ -71,6 +70,8 @@ class Parameters:
         self.learning_rate = float(parameters['learning_rate'])
         self.batch_size = int(parameters['batch_size'])
         self.beta = float(parameters['beta'])
+        self.train_ratio = float(parameters['train_ratio'])
+        self.val_ratio = float(parameters['val_ratio'])
 
         # For cartesian constraint
         self.obs_flag = bool(parameters['obs_flag'])

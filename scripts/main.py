@@ -38,17 +38,17 @@ def computeDataOnBorder(q, N_guess):
         return x_star[0], x_star, u_star, status
     
 
-def fixedVelocityDir(N_guess, n_pts=200):
+def fixedVelocityDir(N_guess, n_pts=50):
     """ Compute data on section of the viability kernel"""
+    sec_pts = []
     controller.resetHorizon(N_guess)
-    x_sec = np.empty((0, model.nx))
-    x_traj = []
     for i in range(nq):
-        j = 0
-        jj = 0
-        while j < n_pts:
+        q_grid = np.linspace(model.x_min[i], model.x_max[i], n_pts)
+        q_grid = np.tile(q_grid, 2)
+        x_sec = np.empty((0, model.nx))
+        for j in range(n_pts * 2):
             q_try = (model.x_max[:nq] + model.x_min[:nq]) / 2
-            q_try[i] = np.random.uniform(model.x_min[i], model.x_max[i])
+            q_try[i] = q_grid[j]
             
             if params.obs_flag:
                 T_ee = kin_dyn_np.forward_kinematics(params.frame_name, np.eye(4), q_try)
@@ -56,22 +56,22 @@ def fixedVelocityDir(N_guess, n_pts=200):
                 d_ee = t_glob - model.t_ball
                 if t_glob[2] <= model.z_bounds[0] or np.dot(d_ee, d_ee) <= model.ball_bounds[0]:
                     continue
-                jj += 1
 
             x_guess = np.zeros((N_guess, model.nx))
             u_guess = np.zeros((N_guess, model.nu))
             x_guess[:, :nq] = np.full((N_guess, nq), q_try)
 
             d = np.zeros(model.nv)
-            d[i] = random.choice([-1, 1])
+            d[i] = 1 if j < n_pts else -1
 
             controller.setGuess(x_guess, u_guess)
-            x_star, _, _, _ = controller.solveVBOC(q_try, d, N_guess, n=N_increment, repeat=50)
+            x_star, _, _, status = controller.solveVBOC(q_try, d, N_guess, n=N_increment, repeat=50)
             if x_star is not None:
                 x_sec = np.vstack([x_sec, x_star[0]])
-                j += 1
-                x_traj.append(x_star)
-    return x_sec, x_traj
+            # else:
+            #     print(f'No solution found at dof {i}, step {j}, flag: {status}')
+        sec_pts.append(x_sec)
+    return sec_pts
                 
 
 
@@ -154,11 +154,11 @@ if __name__ == '__main__':
     if args['vboc']:
         # Generate all the initial condition (training + test)
         if params.obs_flag:
-            progress_bar = tqdm(total=params.prob_num + params.test_num, desc='ICs')
+            progress_bar = tqdm(total=params.prob_num, desc='ICs')
             i = 0
             H_b = np.eye(4)
             q_init = np.empty((0, nq)) 
-            while i < params.prob_num + params.test_num:
+            while i < params.prob_num:
                 q_try = np.random.uniform(model.x_min[:nq], model.x_max[:nq])
                 T_ee = kin_dyn_np.forward_kinematics(params.frame_name, H_b, q_try)
                 t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ model.t_loc 
@@ -171,8 +171,7 @@ if __name__ == '__main__':
             progress_bar.close()
         else:
             # No obstacles --> random initial conditions inside the bounds
-            q_init = np.random.uniform(model.x_min[:nq], model.x_max[:nq], 
-                                       size=(params.prob_num + params.test_num, nq))
+            q_init = np.random.uniform(model.x_min[:nq], model.x_max[:nq], size=(params.prob_num, nq))
 
         print('Start data generation')
         with Pool(params.cpu_num) as p:
@@ -185,10 +184,11 @@ if __name__ == '__main__':
         u_traj = np.asarray([i for i in u_t if i is not None])
     
         solved = len(x_data)
-        print('Solved/numb of problems: %.3f' % (solved / (params.prob_num + params.test_num)))
+        print('Perc solved/numb of problems: %.2f' % (solved / params.prob_num * 100))
         print('Total number of points: %d' % len(x_data))
         np.save(params.DATA_DIR + str(nq) + 'dof_vboc', x_data)
-        np.save(params.DATA_DIR + 'traj_vboc', x_traj)
+        np.save(params.DATA_DIR + str(nq) + 'dof_trajx', x_traj)
+        np.save(params.DATA_DIR + str(nq) + 'dof_traju', u_traj)
 
         # Plot trajectory solution
         PLOTSSS = 0
@@ -265,69 +265,93 @@ if __name__ == '__main__':
         # Load the data
         x_data = np.load(params.DATA_DIR + str(nq) + 'dof_vboc.npy')
         np.random.shuffle(x_data)
-        nn_model = NeuralNetwork(model.nx, 300, 1, torch.nn.ReLU()).to(device)
+        ub = max(model.x_max[nq:]) * np.sqrt(nq)
+        nn_model = NeuralNetwork(model.nx, 400, 1, torch.nn.ReLU()).to(device)
         loss_fn = torch.nn.MSELoss()
         optimizer = torch.optim.Adam(nn_model.parameters(), lr=params.learning_rate)
         regressor = RegressionNN(params, nn_model, loss_fn, optimizer)
 
         # Compute outputs and inputs
+        n = len(x_data)
         mean = np.mean(x_data[:, :nq])
         std = np.std(x_data[:, :nq])
         x_data[:, :nq] = (x_data[:, :nq] - mean) / std
-        y_data = np.linalg.norm(x_data[:, nq:], axis=1).reshape(len(x_data), 1)
-        for k in range(len(x_data)):
+        y_data = np.linalg.norm(x_data[:, nq:], axis=1).reshape(n, 1)
+        for k in range(n):
             if y_data[k] != 0.: 
                 x_data[k, nq:] /= y_data[k] 
+
+        train_size = int(params.train_ratio * n)
+        val_size = int(params.val_ratio * n)
+        test_size = n - train_size - val_size
         
-        x_train, y_train = x_data[:params.prob_num], y_data[:params.prob_num]
+        x_data = torch.Tensor(x_data).to(device)
+        y_data = torch.Tensor(y_data).to(device)
+        x_train_val, y_train_val = x_data[:-test_size], y_data[:-test_size]
         print('Start training\n')
-        evolution = regressor.training(x_train, y_train, args['epochs'])
+        train_evol, val_evol = regressor.training(x_train_val, y_train_val, 
+                                                  train_size, args['epochs'], refine=False)
         print('Training completed\n')
 
         print('Evaluate the model')
-        _, rmse_train = regressor.testing(x_train, y_train)
-        print('RMSE on Training data: %.5f' % rmse_train)
+        rmse_train, rel_err = regressor.testing(x_train_val, y_train_val)
+        print(f'RMSE on Training data: {rmse_train:.5f}')
+        print(f'Maximum error wrt training data: {torch.max(rel_err).item():.5f}')
 
-        x_test, y_test = x_data[-params.test_num:], y_data[-params.test_num:]
-        out_test, rmse_test = regressor.testing(x_test, y_test)
-        print('RMSE on Test data: %.5f' % rmse_test)
-
-        # Safety margin
-        safety_margin = np.amax((out_test - y_test) / y_test)
-        print(f'Maximum error wrt test data: {safety_margin:.5f}')
+        x_test, y_test = x_data[-test_size:], y_data[-test_size:]
+        rmse_test, rel_err = regressor.testing(x_test, y_test)
+        print(f'RMSE on Test data: {rmse_test:.5f}')
+        print(f'Maximum error wrt test data: {torch.max(rel_err).item():.5f}')
 
         # Save the model
         torch.save({'mean': mean, 'std': std, 'model': nn_model.state_dict()}, nn_filename)
 
-        print('\nPlot the loss evolution')
         # Plot the loss evolution
         plt.figure()
         plt.grid(True, which='both')
-        plt.semilogy(evolution)
+        plt.semilogy(train_evol, label='Training', c='b', lw=2)
+        plt.semilogy(val_evol, label='Validation', c='g', lw=2)
+        plt.legend()
         plt.xlabel('Epochs')
         plt.ylabel('MSE Loss (LP filtered)')
         plt.title(f'Training evolution, horizon {N}')
         plt.savefig(params.DATA_DIR + f'evolution_{N}.png')
 
+        # # Plot the relative (mean) error evolution
+        # plt.figure()
+        # plt.grid(True, which='both')
+        # plt.semilogy(err_evol, label='Rel Error', c='b', lw=2)
+        # plt.legend()
+        # plt.xlabel('Epochs')
+        # plt.ylabel('Relative Error')
+        # plt.title(f'Relative error evolution, horizon {N}')
+        # plt.savefig(params.DATA_DIR + f'error_{N}.png')
+
+        # Box plot of the relative error
+        plt.figure()
+        plt.boxplot(rel_err.cpu().numpy(), notch=True)
+        plt.title('Box plot of the relative error')
+        plt.xlabel('Test data')
+        plt.ylabel('Relative error')
+        plt.savefig(params.DATA_DIR + 'boxplot.png')
+
+        # Difference between predicted and true values
+        with torch.no_grad():
+            nn_model.eval()
+            y_pred = nn_model(x_test).cpu().numpy()
+        plt.figure()
+        plt.plot(y_pred - y_test.cpu().numpy())
+        plt.xlabel('Test data')
+        plt.ylabel('Output')
+        plt.savefig(params.DATA_DIR + 'difference.png')
+
     # PLOT THE VIABILITY KERNEL
     if args['plot']:
         nn_data = torch.load(nn_filename)
-        nn_model = NeuralNetwork(model.nx, 300, 1, torch.nn.ReLU())
+        nn_model = NeuralNetwork(model.nx, 400, 1)
         nn_model.load_state_dict(nn_data['model'])
 
-        x_fixed, x_traj = fixedVelocityDir(N)
-        np.save(params.DATA_DIR + 'fixed_dir_traj.npy', x_traj)
-
-        x_f_test = np.empty_like(x_fixed)
-        x_f_test[:, :nq] = (x_fixed[:, :nq] - nn_data['mean']) / nn_data['std']
-        y_f_test = np.linalg.norm(x_fixed[:, nq:], axis=1).reshape(len(x_fixed), 1)
-        x_f_test[:, nq:] = x_fixed[:, nq:] / y_f_test
-        out_f_test = np.empty_like(y_f_test)
-        with torch.no_grad():
-            for i in range(len(x_f_test)):
-                out_f_test[i] = nn_model(torch.Tensor(x_f_test[i])).numpy()
-        print(f'Safety margin: {np.amax((out_f_test - y_f_test) / y_f_test):.5f}')
-
+        x_fixed = fixedVelocityDir(N)
         plot_viability_kernel(params, model, kin_dyn_np, nn_model, nn_data['mean'], nn_data['std'], x_fixed, N)
     plt.show()
 

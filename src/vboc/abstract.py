@@ -1,18 +1,32 @@
 import re
 import numpy as np
-from casadi import MX, vertcat, dot
+from casadi import MX, vertcat, dot, Function
+from urdf_parser_py.urdf import URDF
+import adam
+from adam.casadi import KinDynComputations
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 
 
 class AdamModel:
-    def __init__(self, params, kin_dyn, robot_joints, nq):
+    def __init__(self, params, n_dofs=False):
         self.params = params
+        robot = URDF.from_xml_file(params.robot_urdf)
+        try:
+            n_dofs = n_dofs if n_dofs else len(robot.joints)
+            if n_dofs > len(robot.joints) or n_dofs < 1:
+                raise ValueError
+        except ValueError:
+            print(f'\nInvalid number of degrees of freedom! Must be > 1 and <= {len(robot.joints)}\n')
+            exit()
+        robot_joints = robot.joints[1:n_dofs + 1] if params.urdf_name == 'z1' else robot.joints[:n_dofs]
+        joint_names = [joint.name for joint in robot_joints]
+        kin_dyn = KinDynComputations(params.robot_urdf, joint_names, robot.get_root())
+        kin_dyn.set_frame_velocity_representation(adam.Representations.BODY_FIXED_REPRESENTATION)
         self.H_b = np.eye(4)                                            # Base roto-translation matrix
         self.mass = kin_dyn.mass_matrix_fun()                           # Mass matrix
         self.bias = kin_dyn.bias_force_fun()                            # Nonlinear effects 
-        # TODO: this function must be defined for each part where collision is possible 
-        if params.obs_flag:
-            self.fk = kin_dyn.forward_kinematics_fun(params.frame_name)     # Forward kinematics
+        self.fk = kin_dyn.forward_kinematics_fun(params.frame_name)     # Forward kinematics
+        nq = len(joint_names)
 
         self.amodel = AcadosModel()
         self.amodel.name = params.urdf_name
@@ -37,61 +51,57 @@ class AdamModel:
         self.nq = nq
         self.nv = nq
 
+        # Real dynamics
         self.tau = self.mass(self.H_b, self.x[:nq])[6:, 6:] @ self.u + \
                    self.bias(self.H_b, self.x[:nq], np.zeros(6), self.x[nq:])[6:] 
+        
+        # EE position (global frame)
+        T_ee = self.fk(np.eye(4), self.x[:nq])
+        self.t_loc = np.array([0.035, 0., 0.])
+        self.t_glob = T_ee[:3, 3] + T_ee[:3, :3] @ self.t_loc
+        self.ee_fun = Function('ee_fun', [self.x], [self.t_glob])
 
         # Joint limits
         joint_lower = np.array([joint.limit.lower for joint in robot_joints])
         joint_upper = np.array([joint.limit.upper for joint in robot_joints])
         joint_velocity = np.array([joint.limit.velocity for joint in robot_joints])
-        # joint_effort = np.array([joint.limit.effort for joint in robot_joints]) 
-        joint_effort = np.array([2., 31., 14., 6.]) if params.payload else np.array([2., 23., 10., 4.])
+        if params.urdf_name == 'z1':
+            joint_effort = np.array([2., 23., 10., 4.])
+        else:
+            joint_effort = np.array([joint.limit.effort for joint in robot_joints]) 
+
 
         self.tau_min = - joint_effort
         self.tau_max = joint_effort
         self.x_min = np.hstack([joint_lower, - joint_velocity])
         self.x_max = np.hstack([joint_upper, joint_velocity])
         self.eps = params.state_tol
+    
+    def jointToEE(self, x):
+        return np.array(self.ee_fun(x))
 
-        # Cartesian constraint
-        if params.urdf_name == 'double_pendulum':
-            self.t_loc = np.array([0., 0., 0.2])
-            self.z_bounds = np.array([-0.25, 1e6])
-        elif params.urdf_name == 'z1':
-            # Consider a sphere that contain the EE
-            r_ee = 0.075
-            self.t_loc = np.array([0.035, 0., 0.])  
-            # Obstacles
-            # 1 --> table
-            self.z_bounds = np.array([r_ee, 1e6])
-            # 2 --> ball 
-            r_ball = 0.12
-            self.t_ball = np.array([0.4, 0., r_ball])
-            self.ball_bounds = np.array([(r_ee + r_ball)**2, 1e6])
-        else:
-            self.t_loc = np.array([0., 0., 0.2]) 
+    # def checkPositionBounds(self, q):
+    #     return np.logical_or(np.any(q < self.x_min[:self.nq] + self.eps), np.any(q > self.x_max[:self.nq] - self.eps))
 
-    def checkPositionBounds(self, q):
-        return np.logical_or(np.any(q < self.x_min[:self.nq] + self.eps), np.any(q > self.x_max[:self.nq] - self.eps))
+    # def checkVelocityBounds(self, v):
+    #     return np.logical_or(np.any(v < self.x_min[self.nq:] + self.eps), np.any(v > self.x_max[self.nq:] - self.eps))
 
-    def checkVelocityBounds(self, v):
-        return np.logical_or(np.any(v < self.x_min[self.nq:] + self.eps), np.any(v > self.x_max[self.nq:] - self.eps))
-
-    def checkStateBounds(self, x):
-        return np.logical_or(np.any(x < self.x_min + self.eps), np.any(x > self.x_max - self.eps))
+    # def checkStateBounds(self, x):
+    #     return np.logical_or(np.any(x < self.x_min + self.eps), np.any(x > self.x_max - self.eps))
 
 
 class AbstractController:
-    def __init__(self, model):
+    def __init__(self, model, obstacles=None):
         self.ocp_name = "".join(re.findall('[A-Z][^A-Z]*', self.__class__.__name__)[:-1]).lower()
         self.params = model.params
         self.model = model
+        self.obstacles = obstacles  
 
-        self.N = int(self.params.T / self.params.dt)
+        self.N = self.params.N
         self.ocp = AcadosOcp()
 
         # Dimensions
-        self.ocp.solver_options.tf = self.params.T 
+        self.ocp.solver_options.tf = self.params.N * self.params.dt
         self.ocp.dims.N = self.N
 
         # Model
@@ -114,45 +124,63 @@ class AbstractController:
         self.ocp.constraints.idxbx_e = np.arange(self.model.nx)
 
         # Nonlinear constraint 
-        nl_constraints = []
-        nl_lb = []
-        nl_ub = []   
+        self.nl_con_0, self.nl_lb_0, self.nl_ub_0 = [], [], []
+        self.nl_con, self.nl_lb, self.nl_ub = [], [], []
+        self.nl_con_e, self.nl_lb_e, self.nl_ub_e = [], [], []
         
-        # --> dynamics
+        # --> dynamics (only on running nodes)
+        self.nl_con_0.append(self.model.tau)
+        self.nl_lb_0.append(self.model.tau_min)
+        self.nl_ub_0.append(self.model.tau_max)
         
-        nl_constraints.append(self.model.tau)
-        nl_lb.append(self.model.tau_min)
-        nl_ub.append(self.model.tau_max)
+        self.nl_con.append(self.model.tau)
+        self.nl_lb.append(self.model.tau_min)
+        self.nl_ub.append(self.model.tau_max)
 
-        # --> collision
-        if self.params.obs_flag:
-            T_ee = self.model.fk(self.model.H_b, self.model.x[:self.model.nq]) 
-            T_ee[:3, 3] += T_ee[:3, :3] @ self.model.t_loc
-            # 1) table --> z_ee > r_ee
-            nl_constraints.append(T_ee[2, 3])
-            nl_lb.append(self.model.z_bounds[0])
-            nl_ub.append(self.model.z_bounds[1])
-            # 2) ball --> d(p_ee, p_b)^2 > (r_ee + r_ball)^2
-            d = T_ee[:3, 3] - self.model.t_ball
-            nl_constraints.append(dot(d, d))
-            nl_lb.append(self.model.ball_bounds[0])
-            nl_ub.append(self.model.ball_bounds[1])
+        # --> collision (both on running and terminal nodes)
+        if obstacles is not None and self.params.obs_flag:
+            # Collision avoidance with two obstacles
+            t_glob = self.model.t_glob
+            for obs in self.obstacles:
+                if obs['name'] == 'floor':
+                    self.nl_con_0.append(t_glob[2])
+                    self.nl_con.append(t_glob[2])
+                    self.nl_con_e.append(t_glob[2])
 
-        
-        self.model.amodel.con_h_expr_0 = vertcat(*nl_constraints)   
-        self.model.amodel.con_h_expr = vertcat(*nl_constraints)
-        self.model.amodel.con_h_expr_e = vertcat(*nl_constraints[1:])
+                    self.nl_lb_0.append(obs['bounds'][0])
+                    self.nl_ub_0.append(obs['bounds'][1])
+                    self.nl_lb.append(obs['bounds'][0])
+                    self.nl_ub.append(obs['bounds'][1])
+                    self.nl_lb_e.append(obs['bounds'][0])
+                    self.nl_ub_e.append(obs['bounds'][1])
+                elif obs['name'] == 'ball':
+                    dist_b = (t_glob - obs['position']).T @ (t_glob - obs['position'])
+                    self.nl_con_0.append(dist_b)
+                    self.nl_con.append(dist_b)
+                    self.nl_con_e.append(dist_b)
 
-        
-        self.ocp.constraints.lh_0 = np.hstack(nl_lb)
-        self.ocp.constraints.uh_0 = np.hstack(nl_ub)
-        self.ocp.constraints.lh = np.hstack(nl_lb)
-        self.ocp.constraints.uh = np.hstack(nl_ub)
-        self.ocp.constraints.lh_e = np.array(nl_lb[1:])
-        self.ocp.constraints.uh_e = np.array(nl_ub[1:])
-            
+                    self.nl_lb_0.append(obs['bounds'][0])
+                    self.nl_ub_0.append(obs['bounds'][1])
+                    self.nl_lb.append(obs['bounds'][0])
+                    self.nl_ub.append(obs['bounds'][1])
+                    self.nl_lb_e.append(obs['bounds'][0])
+                    self.nl_ub_e.append(obs['bounds'][1])
+
         # Additional constraints
         self.addConstraint()
+        
+        self.model.amodel.con_h_expr_0 = vertcat(*self.nl_con_0)   
+        self.model.amodel.con_h_expr = vertcat(*self.nl_con)
+
+        self.ocp.constraints.lh_0 = np.hstack(self.nl_lb_0)
+        self.ocp.constraints.uh_0 = np.hstack(self.nl_ub_0)
+        self.ocp.constraints.lh = np.hstack(self.nl_lb)
+        self.ocp.constraints.uh = np.hstack(self.nl_ub)
+
+        if len(self.nl_con_e) > 0:
+            self.model.amodel.con_h_expr_e = vertcat(*self.nl_con_e)
+            self.ocp.constraints.lh_e = np.array(self.nl_lb_e)
+            self.ocp.constraints.uh_e = np.array(self.nl_ub_e)
 
         # Solver options
         self.ocp.solver_options.integrator_type = "DISCRETE"
@@ -195,3 +223,16 @@ class AbstractController:
         self.N = N
         self.ocp_solver.set_new_time_steps(np.full(N, self.params.dt))
         self.ocp_solver.update_qp_solver_cond_N(N)
+
+    def checkCollision(self, x):
+        if self.obstacles is not None and self.params.obs_flag:
+            t_glob = self.model.jointToEE(x) 
+            for obs in self.obstacles:
+                if obs['name'] == 'floor':
+                    if t_glob[2] < obs['bounds'][0]:
+                        return False
+                elif obs['name'] == 'ball':
+                    dist_b = np.sum((t_glob.flatten() - obs['position']) ** 2) 
+                    if dist_b < obs['bounds'][0]:
+                        return False
+        return True

@@ -4,8 +4,8 @@ from .abstract import AbstractController
 
 
 class ViabilityController(AbstractController):
-    def __init__(self, simulator):
-        super().__init__(simulator)
+    def __init__(self, model, obstacles=None):
+        super().__init__(model, obstacles)
         self.C = np.zeros((self.model.nv, self.model.nx))
 
     def addCost(self):
@@ -54,18 +54,18 @@ class ViabilityController(AbstractController):
         N = N_start
         gamma = 0
         x_sol, u_sol = None, None
-        if n == 0:
-            # N-BRS --> constant horizon N, no need to repeat the process until convergence 
-            repeat = 1
+        # if n == 0:
+        #     # N-BRS --> constant horizon N, no need to repeat the process until convergence 
+        #     repeat = 1
         for _ in range(repeat):
             # Solve the OCP
             status = self.solve(q, d)
-            if status == 0:
+            if status == 0 or status == 2:
                 # Compare the current cost with the previous one:
                 x0 = self.ocp_solver.get(0, "x")
                 gamma_new = np.linalg.norm(x0[self.model.nq:])
 
-                if gamma_new < gamma + self.tol:
+                if gamma_new < gamma + self.tol and status == 0:
                     break
                 gamma = gamma_new
 
@@ -85,4 +85,7 @@ class ViabilityController(AbstractController):
                 self.resetHorizon(N)
             else:
                 return None, None, None, status
-        return x_sol, u_sol, N, status
+        if status == 0:
+            return x_sol, u_sol, N, status
+        else:
+            return None, None, None, status

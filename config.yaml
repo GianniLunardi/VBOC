@@ -1,28 +1,28 @@
-prob_num: 150000          # number of OCP to create dataset
+prob_num: 600000          # number of OCP to create dataset
 n_steps: 200              # number of time steps in each test
-cpu_num: 24
+cpu_num: 26
 
-T: 1                      # horizon in seconds
-dt: 1e-2                  # time step
-alpha: 2                  # safety margin 
+N: 45                     # horizon in seconds
+dt: 5e-3                  # time step
+alpha: 15                  # safety margin 
 
 solver_mode: 'BALANCE'    # HPIPM mode, can be --> 'BALANCE', 'ROBUST', 'SPEED', 'SPEED_ABS'
 nlp_max_iter: 1000
-qp_max_iter: 100
-nlp_tol_stat: 1e-3        # NLP solver tolerance on stationary residuals
+qp_max_iter: 200
 alpha_reduction: 0.3
 alpha_min: 1e-2
 levenberg_marquardt: 1e-5
 
-state_tol: 1e-2           # state tolerance
+state_tol: 0e-2           # state tolerance
 conv_tol: 1e-3            # convergence tolerance for the task
 cost_tol: 1e-3            # Tolerance for the cost
 
 learning_rate: 1e-3       # learning rate
-batch_size: 4096          # batch size
+batch_size: 4096          # batch size, 4096, 8192, 16384
 beta: 0.95                # low pass filter coefficient
 train_ratio: 0.7          # training dataset % size
 val_ratio: 0.2            # validation dataset % size
+hidden_size: 256         # number of hidden units in the neural network
+hidden_layers: 2          # number of hidden layers in the neural network
 
-obs_flag: false           # activation of Cartesian constraints
-payload: false            # add payload on end-effector
+obs_flag: true            # activation of Cartesian constraints
